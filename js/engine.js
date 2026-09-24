@@ -13,8 +13,7 @@ export const CHARS = [
   { key: 'doll', name: 'Няшкакоджладка', tag: 'Рюши, бантики, холод' },
   { key: 'alien', name: 'Инопришленец юпитерский', tag: 'Прилетел за пивом' },
   { key: 'priest', name: 'Коджлад', tag: 'Всё видел, всё знает' },
-  { key: 'boss', name: 'Начальник', tag: 'Всё решено заранее' },
-  { key: 'shaggy', name: 'Патлатый', tag: 'Строит рожи' },
+  { key: 'boss', name: 'Мишаня', tag: 'Всё решено заранее' },
 ];
 export const CHAR_KEYS = CHARS.map((c) => c.key);
 export const charInfo = (k) => CHARS.find((c) => c.key === k) || CHARS[0];
