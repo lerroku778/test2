@@ -11,11 +11,13 @@ export class StylePass extends Pass {
     this.style = style;
     this.hide = []; // объекты, которые не должны давать контур (дым)
     this.normalMat = new THREE.MeshNormalMaterial();
-    this.nrt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+    // нормали и маска дыма — 8 бит на канал: для поиска контуров точности хватает с запасом,
+    // а памяти и пропускной способности вдвое меньше, чем у half float (финальный проход читает нормали 5 раз)
+    this.nrt = new THREE.WebGLRenderTarget(1, 1);
     this.nrt.depthTexture = new THREE.DepthTexture(1, 1);
     this.nrt.depthTexture.type = THREE.UnsignedIntType;
     // маска дыма/дождя: рисуются поверх глубины сцены, контуры под ними гаснут
-    this.srt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+    this.srt = new THREE.WebGLRenderTarget(1, 1);
     this.srt.depthTexture = this.nrt.depthTexture;
     this.soft = []; // полупрозрачные объекты, сквозь которые контуры не должны просвечивать
     const mode = { toon: 1, repo: 2, clean: 0 }[style] ?? 1;

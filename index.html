@@ -85,8 +85,11 @@
   .lobby-tod { display: grid; gap: 6px; min-width: 260px; }
   .lobby-tod.small { min-width: 170px; }
   .seg.two { grid-template-columns: repeat(2, 1fr); }
-  .links { display: flex; gap: 18px; font-size: 14px; color: var(--muted); }
+  .links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; font-size: 14px; color: var(--muted); }
   .links button { text-decoration: underline; text-underline-offset: 3px; }
+  .links .fps { display: inline-flex; align-items: center; gap: 6px; }
+  .links .fps input { width: 64px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); background: rgba(0,0,0,0.35); color: var(--bone); font: 600 13px var(--mono); }
+  .sens input.fpsIn { accent-color: initial; padding: 8px 12px; font: 600 14px var(--mono); }
 
   /* ---------- лобби ---------- */
   #lobby { position: fixed; inset: 0; z-index: 20; display: grid; place-items: end center; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); pointer-events: none; }
@@ -289,7 +292,7 @@
     </div>
     <button id="soloBtn" class="btn ghost">Играть с ботами</button>
     <div id="menuErr" role="alert"></div>
-    <div class="links"><button id="rulesBtn">Правила</button><button id="gfxBtn">Графика: высокая</button><button id="styleBtn">Стиль: мульт</button></div>
+    <div class="links"><button id="rulesBtn">Правила</button><button id="gfxBtn">Графика: высокая</button><button id="styleBtn">Стиль: мульт</button><label class="fps">Лимит FPS <input class="fpsIn" type="number" min="0" max="1000" step="1" inputmode="numeric" placeholder="∞" aria-label="Лимит кадров в секунду, пусто — без лимита"></label></div>
   </div>
 </section>
 
@@ -360,6 +363,7 @@
     <div class="row"><button id="pSnd" class="btn ghost">Звук: вкл</button><button id="pMus" class="btn ghost">Музыка: вкл</button></div>
     <div class="row"><button id="pFs" class="btn ghost">Во весь экран</button><button id="pRules" class="btn ghost">Правила</button></div>
     <div class="sens"><label class="label" for="sensIn">Чувствительность мыши</label><b id="sensVal">1.0</b><input type="range" id="sensIn" min="0.25" max="3" step="0.05" value="1"></div>
+    <div class="sens"><label class="label" for="fpsIn2">Лимит FPS (пусто — без лимита, до 1000)</label><input class="fpsIn field" id="fpsIn2" type="number" min="0" max="1000" step="1" inputmode="numeric" placeholder="∞"></div>
     <div class="binds">
       <div><kbd>Мышь</kbd></div><div>смотреть по сторонам</div>
       <div><kbd>ЛКМ</kbd></div><div>взять карту под прицелом · по столу — выложить · по игроку — «Лжец!»</div>

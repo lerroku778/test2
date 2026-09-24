@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as T from './textures.js';
-import { mat, seatPos, seatYaw } from './world.js';
+import { mat, seatPos, seatYaw, GLASS_BLEND } from './world.js';
 import { rigidSkin, referenced } from './merge.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -25,7 +25,10 @@ function limb(a, b, r, m, parent) {
   return me;
 }
 
-function sph(r, m, x, y, z, parent, sx = 1, sy = 1, sz = 1, ws = 24, hs = 18) {
+function sph(r, m, x, y, z, parent, sx = 1, sy = 1, sz = 1, ws, hs) {
+  // мелочь меньше ~1 см (блики глаз, пуговицы, заклёпки) не нужна в 24×18 сегментов
+  const tiny = r * Math.max(sx, sy, sz) < 0.012;
+  ws = ws ?? (tiny ? 12 : 24); hs = hs ?? (tiny ? 9 : 18);
   const me = new THREE.Mesh(new THREE.SphereGeometry(r, ws, hs), m);
   me.position.set(x, y, z);
   me.scale.set(sx, sy, sz);
@@ -44,7 +47,9 @@ function bx(w, h, d, m, x, y, z, parent, rad = 0) {
 function curls(parent, c, color, { n = 90, long = 0, longN = 0, seed = 1, size = 1, faceOpen = 0.36, top = 0.0, rough = 0.62 }) {
   const r = T.rng(seed);
   const m = mat({ color, roughness: rough, sheen: 0.6, sheenColor: new THREE.Color(color).multiplyScalar(1.6), sheenRoughness: 0.5 });
-  const geo = new THREE.IcosahedronGeometry(0.05 * size, 2);
+  // detail 1 (80 треугольников на кудряшку вместо 320): кудрей по 400–560 штук, и раньше они
+  // одни давали две трети всех треугольников сцены — во всех проходах и в обеих картах теней
+  const geo = new THREE.IcosahedronGeometry(0.05 * size, 1);
   const total = n + longN;
   const inst = new THREE.InstancedMesh(geo, m, total);
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = V();
@@ -555,7 +560,8 @@ export class Character {
       this.baseBrow = 0.6;
       // очки
       const frameM = mat({ color: '#0b0b0c', roughness: 0.25, clearcoat: 1 });
-      const lensM = mat({ color: '#ffffff', transmission: 1, roughness: 0.02, thickness: 0.002, transparent: true, opacity: 0.25 });
+      // линзы — обычная прозрачность: transmission заставлял перерисовывать всю сцену лишний раз каждый кадр
+      const lensM = new THREE.MeshPhysicalMaterial({ color: '#000000', roughness: 0.02, transparent: true, opacity: 0.06, envMapIntensity: 0.45, ...GLASS_BLEND });
       for (const s of [-1, 1]) {
         const sh = new THREE.Shape();
         roundedRect(sh, -0.036, -0.026, 0.072, 0.052, 0.008);

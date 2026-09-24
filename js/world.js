@@ -541,12 +541,18 @@ function buildPack() {
   return g;
 }
 
+// смешивание «отражение поверх»: цвет стекла прибавляется целиком, фон гасится на opacity
+export const GLASS_BLEND = { blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor };
 export function buildBottle(labelTex) {
   const group = new THREE.Group();
-  const glassM = mat({
-    // без лака и с приглушённым отражением: раньше блики на стекле выбивались в засветы
-    color: '#fff3e6', transmission: 1, roughness: 0.12, thickness: 0.05, ior: 1.45, specularIntensity: 0.45,
-    attenuationColor: '#e39a55', attenuationDistance: 0.4, envMapIntensity: 0.45,
+  // Стекло без transmission: из-за transmission three.js каждый кадр перерисовывал всю сцену
+  // ещё раз в отдельную текстуру (целый лишний проход ради четырёх бутылок).
+  // Как у настоящего стекла: отражения и блики ложатся сверху в полную силу, собственный цвет —
+  // лишь тёмный янтарный налёт, а то, что за стеклом (жидкость, стол), приглушается.
+  // Подобрано по кадрам до/после в стилях «мульт» и «чистый». Без лака: раньше блики выбивались в засветы.
+  const glassM = new THREE.MeshPhysicalMaterial({
+    color: '#3a1606', roughness: 0.12, ior: 1.45, specularIntensity: 0.45, envMapIntensity: 0.8,
+    transparent: true, opacity: 0.45, ...GLASS_BLEND,
   });
   const body = new THREE.Mesh(new RoundedBoxGeometry(0.12, 0.155, 0.056, 5, 0.022), glassM);
   body.position.y = 0.0775;
@@ -558,6 +564,8 @@ export function buildBottle(labelTex) {
   const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.019, 0.04, 20), glassM);
   neck.position.y = 0.215;
   group.add(neck);
+  // стекло рисуется раньше этикеток (как раньше, когда оно шло отдельным проходом)
+  for (const m of [body, shoulder, neck]) m.renderOrder = -1;
   const capM = mat({ color: '#5a3017', roughness: 0.35, metalness: 0.4, clearcoat: 0.6 });
   const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.04, 24), capM);
   cap.position.y = 0.25;

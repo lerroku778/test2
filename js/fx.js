@@ -11,21 +11,36 @@ export const CARD = { w: 0.074, h: 0.104, t: 0.0016 };
 export class Cards {
   constructor(scene) {
     this.scene = scene;
-    const face = {};
+    // Карта — один вызов отрисовки вместо шести: рубашка, лицо и торец лежат в одной текстуре
+    // [рубашка | полоса цвета торца | лицо], у коробки переразмечены UV. Раньше каждая грань
+    // коробки была отдельным материалом, и карты давали около трети всех вызовов за кадр.
     this.canvases = {};
-    for (const r of ['K', 'Q', 'A', 'J']) {
-      const c = T.cardFaceCanvas(r);
-      this.canvases[r] = c;
-      face[r] = mat({ map: T.toTex(c), roughness: 0.45, clearcoat: 0.3, clearcoatRoughness: 0.4 });
-      face[r].map.wrapS = face[r].map.wrapT = THREE.ClampToEdgeWrapping;
+    for (const r of ['K', 'Q', 'A', 'J']) this.canvases[r] = T.cardFaceCanvas(r);
+    this.canvases.back = T.cardBackCanvas();
+    const cw = T.CARD_W, ch = T.CARD_H, gut = 32, aw = cw * 2 + gut;
+    this.mats = {};
+    for (const k of ['back', 'K', 'Q', 'A', 'J']) {
+      const [c, g] = T.canvas(aw, ch);
+      g.drawImage(this.canvases.back, 0, 0);
+      g.fillStyle = '#e8dcc2';
+      g.fillRect(cw, 0, gut, ch);
+      g.drawImage(this.canvases[k], cw + gut, 0);
+      const m = mat({ map: T.toTex(c), roughness: 0.45, clearcoat: 0.3, clearcoatRoughness: 0.4 });
+      m.map.wrapS = m.map.wrapT = THREE.ClampToEdgeWrapping;
+      this.mats[k] = m;
     }
-    const bc = T.cardBackCanvas();
-    this.canvases.back = bc;
-    this.back = mat({ map: T.toTex(bc), roughness: 0.45, clearcoat: 0.3, clearcoatRoughness: 0.4 });
-    this.back.map.wrapS = this.back.map.wrapT = THREE.ClampToEdgeWrapping;
-    this.edge = mat({ color: '#e8dcc2', roughness: 0.8 });
-    this.face = face;
     this.geo = new THREE.BoxGeometry(CARD.w, CARD.t, CARD.h);
+    {
+      // грани BoxGeometry по 4 вершины: +X, −X, +Y (рубашка), −Y (лицо), +Z, −Z (торцы)
+      const uv = this.geo.attributes.uv;
+      for (let i = 0; i < uv.count; i++) {
+        const f = Math.floor(i / 4), u = uv.getX(i);
+        if (f === 2) uv.setX(i, u * cw / aw);
+        else if (f === 3) uv.setX(i, (cw + gut + u * cw) / aw);
+        else uv.setXY(i, (cw + gut / 2) / aw, 0.5);
+      }
+      this.geo.clearGroups();
+    }
     // подсветка карт в руке: рамка за картой (выбрана — янтарная, под прицелом — светлая)
     this.glowGeo = new THREE.PlaneGeometry(CARD.w + 0.009, CARD.h + 0.009);
     this.glowSel = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 1.55, 0.42), fog: false });
@@ -45,14 +60,13 @@ export class Cards {
 
   make(rank = null) {
     // +Y — рубашка, −Y — лицо (карта лежит рубашкой вверх)
-    const m = [this.edge, this.edge, this.back, rank ? this.face[rank] : this.back, this.edge, this.edge];
-    const me = new THREE.Mesh(this.geo, m);
+    const me = new THREE.Mesh(this.geo, this.mats[rank] || this.mats.back);
     me.castShadow = true;
     me.receiveShadow = true;
     return me;
   }
 
-  setFace(mesh, rank) { mesh.material = [this.edge, this.edge, this.back, this.face[rank] || this.back, this.edge, this.edge]; }
+  setFace(mesh, rank) { mesh.material = this.mats[rank] || this.mats.back; }
 
   pilePose(i) {
     const s = this.scatter[i % this.scatter.length];
@@ -339,6 +353,9 @@ export class Particles {
     }
     this.v.instanceColor.needsUpdate = true;
     this.v.castShadow = true;
+    // рисуем только уже вылетевшие капли: раньше все 900 рисовались под полом всегда, в каждом проходе и в тенях
+    this.v.count = 0;
+    this.v.visible = false;
     scene.add(this.v);
     this.vi = 0;
     this.vDirty = true;
@@ -371,6 +388,9 @@ export class Particles {
       o.vel.copy(dir).multiplyScalar(sp).add(V((Math.random() - 0.5) * 0.45, Math.random() * 0.4, (Math.random() - 0.5) * 0.45));
       o.s = 0.6 + Math.random() * 1.4;
     }
+    // капли берутся из кольца по порядку, поэтому живые — это первые min(vi, N)
+    this.v.count = Math.min(this.vi, this.N);
+    this.v.visible = true;
     this.vDirty = true;
   }
 
@@ -392,6 +412,9 @@ export class Particles {
     this.puddles.forEach((p) => this.scene.remove(p));
     this.puddles = [];
     this.vp.forEach((o) => { o.alive = false; o.stuck = false; o.p.set(0, -10, 0); });
+    this.vi = 0;
+    this.v.count = 0;
+    this.v.visible = false;
     this.vDirty = true;
   }
 

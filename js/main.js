@@ -45,7 +45,8 @@ scene.background = new THREE.Color('#0c0907');
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.02, 200);
 camera.position.set(4, 1.8, -5);
 
-const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: THREE.HalfFloatType, samples: Q.samples });
+// в R.E.P.O. кадр всё равно пикселизуется крупными клетками — сглаживание там ничего не даёт
+const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: THREE.HalfFloatType, samples: STYLE === 'repo' ? 0 : Q.samples });
 const composer = new EffectComposer(renderer, rt);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.45, 2.2);
@@ -135,8 +136,10 @@ async function boot() {
   pool.forEach((c) => { c.cig.visible = true; c.root.visible = true; });
   particles.smoke(V(0, TABLE_Y + 0.3, 0), V(), 0.01, 0.05, 0);
   particles.update(0.001);
+  particles.v.visible = true; // капли рвоты прячутся, пока их нет, — шейдер собираем заранее
   renderer.compile(scene, camera);
   composer.render(0.016);
+  particles.v.visible = false;
   scene.remove(warm);
   pool.forEach((c) => { c.cig.visible = false; });
   setP(88, 'Зажигаем гирлянды…');
@@ -832,6 +835,9 @@ const CENTER = new THREE.Vector2(0, 0);
 const tablePlane = new THREE.Plane(V(0, 1, 0), -TABLE_Y);
 const YAW_MAX = 1.9, PITCH_MIN = -0.95, PITCH_MAX = 1.25;
 let idleLookAt = 0;
+// лимит кадров: 0 — без лимита (по умолчанию), иначе 1…1000 в секунду
+let fpsCap = clamp(Math.round(+store.get('fps', '0') || 0), 0, 1000);
+let frameDue = 0;
 
 function stepChars(dt, time) {
   for (let i = 0; i < 4; i++) {
@@ -898,8 +904,13 @@ function primaryAction(aim = G.aim) {
   else if (aim.t === 'liar') callLiar();
 }
 
-function loop() {
+function loop(now) {
   requestAnimationFrame(loop);
+  if (fpsCap > 0) {
+    // кадр пропускаем, пока не подошло его время; запас в 1 мс — чтобы не терять кадры из-за дрожания таймера
+    if (now + 1 < frameDue) return;
+    frameDue = Math.max(frameDue + 1000 / fpsCap, now);
+  }
   const realDt = clock.getDelta();
   const dt = Math.min(0.05, realDt);
   const time = clock.elapsedTime;
@@ -1207,6 +1218,20 @@ $('pExit').addEventListener('click', leave);
 const showSens = () => { $('sensIn').value = G.sens; $('sensVal').textContent = G.sens.toFixed(2); };
 showSens();
 $('sensIn').addEventListener('input', () => { G.sens = clamp(+$('sensIn').value || 1, 0.25, 3); store.set('sens', G.sens); showSens(); });
+// лимит FPS: одно значение на меню и паузу, пусто или 0 — без лимита
+const fpsIns = [...document.querySelectorAll('.fpsIn')];
+const showFps = () => fpsIns.forEach((el) => { if (document.activeElement !== el) el.value = fpsCap ? String(fpsCap) : ''; });
+showFps();
+fpsIns.forEach((el) => {
+  el.addEventListener('input', () => {
+    const v = el.value.trim() === '' ? 0 : clamp(Math.round(+el.value || 0), 0, 1000);
+    fpsCap = v; frameDue = 0;
+    store.set('fps', String(v));
+    fpsIns.forEach((o) => { if (o !== el) o.value = v ? String(v) : ''; });
+  });
+  el.addEventListener('change', showFps);
+  el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') el.blur(); }); // цифры и Enter в поле — не команды игры
+});
 $('copyBtn').addEventListener('click', async () => {
   const url = `${location.origin}${location.pathname}?room=${G.code}`;
   try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована — кидай друзьям'); } catch { toast(url, 6000); }
