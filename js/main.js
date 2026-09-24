@@ -4,7 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { StylePass } from './post.js';
-import { STYLE, STYLES, STYLE_NAMES, TOON } from './style.js';
+import { STYLE, TOON } from './style.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as T from './textures.js';
 import { buildWorld, TABLE_Y, TABLE_R } from './world.js';
@@ -49,8 +49,7 @@ camera.position.set(4, 1.8, -5);
 // Не все мобильные GPU умеют рисовать в half float: там кадр идёт в обычные 8 бит и без bloom
 // (его цели тоже half float) — иначе был бы чёрный экран.
 const halfOK = renderer.extensions.has('EXT_color_buffer_half_float') || renderer.extensions.has('EXT_color_buffer_float');
-// в R.E.P.O. кадр всё равно пикселизуется крупными клетками — сглаживание там ничего не даёт
-const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: halfOK ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: STYLE === 'repo' ? 0 : Q.samples });
+const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: halfOK ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: Q.samples });
 const composer = new EffectComposer(renderer, rt);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.45, 2.2);
@@ -73,7 +72,7 @@ const G = {
   st: null, pid: null, mySeat: -1, code: '', solo: false, recvAt: 0,
   screen: 'loading', timers: [], sel: new Set(), handKey: '',
   visualShots: [0, 0, 0, 0], visualDead: [false, false, false, false],
-  look: { ...LOOK0 }, mouse: { x: 0.5, y: 0.5 }, shake: 0, flash: 0, poison: 0,
+  look: { ...LOOK0 }, mouse: { x: 0.5, y: 0.5 }, shake: 0, flash: 0, poison: 0, drunk: 0,
   spectate: false, lastSmoke: 0, camMode: 'orbit', fade: 1, dealing: false,
   locked: false, zoom: false, aim: null, hover: -1, pendingPlay: null,
   sens: clamp(+store.get('sens', '1') || 1, 0.25, 3),
@@ -870,6 +869,8 @@ const CENTER = new THREE.Vector2(0, 0);
 const tablePlane = new THREE.Plane(V(0, 1, 0), -TABLE_Y);
 const YAW_MAX = 1.9, PITCH_MIN = -0.95, PITCH_MAX = 1.25;
 let idleLookAt = 0;
+// сила опьянения по числу выпитых глотков: сначала чуть-чуть, к пятому — сильно
+const DRUNK = [0, 0.14, 0.3, 0.5, 0.74, 1];
 // лимит кадров: 0 — без лимита (по умолчанию), иначе 1…1000 в секунду
 let fpsCap = clamp(Math.round(+store.get('fps', '0') || 0), 0, 1000);
 let frameDue = 0;
@@ -995,6 +996,12 @@ function loop(now) {
     me.head.localToWorld(camera.position.set(0, me.headC.y + 0.03, me.headC.z + 0.075));
     tmpE.set(me.s.pitch + me.s.lean * 0.35, me.s.yaw, me.s.roll);
     camera.quaternion.copy(me.root.quaternion).multiply(tmpQ.setFromEuler(tmpE)).multiply(flipY);
+    if (G.drunk > 0.001) {
+      // пьяного покачивает: голова плавно гуляет и заваливается набок
+      const d = G.drunk;
+      tmpE.set(Math.sin(time * 0.53) * 0.025 * d, Math.sin(time * 0.37 + 1.3) * 0.035 * d, Math.sin(time * 0.61 + 0.4) * 0.06 * d);
+      camera.quaternion.multiply(tmpQ.setFromEuler(tmpE));
+    }
     const fov = G.zoom && G.screen === 'hud' ? 30 : 57;
     camera.fov = snap ? fov : camera.fov + (fov - camera.fov) * zoomK;
   } else if (G.camMode === 'spect') {
@@ -1055,9 +1062,15 @@ function loop(now) {
   renderer.toneMappingExposure += (expT - renderer.toneMappingExposure) * Math.min(1, dt * 2);
   G.flash = Math.max(0, G.flash - dt * 2.2);
   G.poison = Math.max(0, G.poison - dt * 0.08);
+  // опьянение: после каждого пережитого глотка сильнее; плавно нарастает, пока пьёшь.
+  // Выбыл (наблюдаешь) или партия ещё не идёт — трезвый взгляд.
+  const shots = G.mySeat >= 0 && G.screen === 'hud' && !G.spectate ? G.visualShots[G.mySeat] : 0;
+  const drunkT = DRUNK[Math.min(shots, DRUNK.length - 1)];
+  G.drunk += (drunkT - G.drunk) * Math.min(1, dt * (drunkT > G.drunk ? 0.6 : 2));
   G.fade = Math.max(0, G.fade - Math.min(0.2, realDt) * 0.9);
   grade.uniforms.time.value = time;
   grade.uniforms.poison.value = G.poison;
+  grade.uniforms.drunk.value = G.drunk;
   grade.uniforms.flash.value = G.flash;
   grade.uniforms.fade.value = G.fade;
 
@@ -1316,11 +1329,6 @@ $('gfxBtn').addEventListener('click', () => {
   const order = ['high', 'mid', 'low'];
   const nq = order[(order.indexOf(quality) + 1) % 3];
   store.set('gfx', nq);
-  location.reload();
-});
-$('styleBtn').textContent = `Стиль: ${STYLE_NAMES[STYLE]}`;
-$('styleBtn').addEventListener('click', () => {
-  store.set('style', STYLES[(STYLES.indexOf(STYLE) + 1) % STYLES.length]);
   location.reload();
 });
 $('nameIn').addEventListener('change', () => { if (G.st) net.send({ t: 'name', nm: myName() }); });

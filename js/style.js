@@ -1,11 +1,8 @@
-// Визуальный стиль игры: «мульт» (целшейдинг + контуры), «repo» (пиксели + дизеринг), «чистый» (PBR).
+// Визуальный стиль игры — «мульт»: целшейдинг + контуры. Другие стили (R.E.P.O., чистый PBR) убраны.
 import * as THREE from 'three';
 
-const read = () => { try { return localStorage.getItem('style'); } catch { return null; } };
-export const STYLES = ['toon', 'repo', 'clean'];
-export const STYLE_NAMES = { toon: 'мульт', repo: 'R.E.P.O.', clean: 'чистый' };
-export const STYLE = STYLES.includes(read()) ? read() : 'toon';
-export const TOON = STYLE === 'toon';
+export const STYLE = 'toon';
+export const TOON = true;
 
 // Три ступени света + мягкая тень: ровные плоские пятна, без пересветов.
 let grad;
