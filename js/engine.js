@@ -9,10 +9,10 @@ export const RANK_ONE = { K: 'король', Q: 'дама', A: 'туз', J: 'д�
 export const SHOTS = 6;
 
 export const CHARS = [
-  { key: 'metal', name: 'Шипастый', tag: 'Косуха, цепи, орёт' },
-  { key: 'doll', name: 'Зефирка', tag: 'Рюши, бантики, холод' },
-  { key: 'alien', name: 'Гость', tag: 'Прилетел за пивом' },
-  { key: 'priest', name: 'Батюшка', tag: 'Всё видел, всё знает' },
+  { key: 'metal', name: 'Шеим', tag: 'Рокер в кожанке' },
+  { key: 'doll', name: 'Няшкакоджладка', tag: 'Рюши, бантики, холод' },
+  { key: 'alien', name: 'Инопришленец юпитерский', tag: 'Прилетел за пивом' },
+  { key: 'priest', name: 'Коджлад', tag: 'Всё видел, всё знает' },
 ];
 
 export const TIMES = { deal: 2600, turn: 45000, reveal: 4200, drink: 7600 };

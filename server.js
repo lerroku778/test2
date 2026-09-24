@@ -1,4 +1,4 @@
-// Сервер «Бара Лжецов»: раздаёт статику и держит комнаты по WebSocket.
+// Сервер «Ублюдского бара»: раздаёт статику и держит комнаты по WebSocket.
 // Запуск: npm install && node server.js   (порт — переменная PORT, по умолчанию 8080)
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -105,4 +105,4 @@ setInterval(() => {
   }
 }, 20_000);
 
-server.listen(PORT, HOST, () => console.log(`Бар Лжецов: http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`Ублюдский бар: http://${HOST}:${PORT}`));

@@ -18,7 +18,7 @@ export class Room {
   get size() { return this.people.size; }
 
   join(pid, nm) {
-    this.people.set(pid, { nm: clean(nm) || 'Гость' });
+    this.people.set(pid, { nm: clean(nm) || 'Игрок' });
     this.emptySince = 0;
     this.send(pid, { t: 'joined', code: this.code, pid });
     this.push();

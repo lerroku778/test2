@@ -72,6 +72,7 @@ export class Cards {
     g.rotation.x = -0.45;
     ch.torso.add(g);
     this.fans[ch.seat] = { g, ch, cards: [] };
+    ch.fanGroup = g;
   }
 
   setFan(seat, n) {
@@ -300,12 +301,22 @@ export class Particles {
   }
 }
 
-export function addButt(ashtray) {
+let buttRes;
+export function makeButt() {
+  buttRes = buttRes || {
+    fg: new THREE.CylinderGeometry(0.0042, 0.0042, 0.022, 10), pg: new THREE.CylinderGeometry(0.0042, 0.0042, 0.01, 10),
+    fm: mat({ color: '#c9793a', roughness: 0.7 }), pm: mat({ color: '#6a6560', roughness: 0.9 }),
+  };
   const g = new THREE.Group();
-  const f = new THREE.Mesh(new THREE.CylinderGeometry(0.0042, 0.0042, 0.022, 10), mat({ color: '#c9793a', roughness: 0.7 }));
+  const f = new THREE.Mesh(buttRes.fg, buttRes.fm);
   f.rotation.z = Math.PI / 2; g.add(f);
-  const p = new THREE.Mesh(new THREE.CylinderGeometry(0.0042, 0.0042, 0.01, 10), mat({ color: '#6a6560', roughness: 0.9 }));
+  const p = new THREE.Mesh(buttRes.pg, buttRes.pm);
   p.rotation.z = Math.PI / 2; p.position.x = 0.016; g.add(p);
+  return g;
+}
+
+export function addButt(ashtray) {
+  const g = makeButt();
   const n = ashtray.userData.butts.length;
   const a = n * 2.1 + Math.random(), d = 0.02 + Math.random() * 0.03;
   g.position.set(Math.cos(a) * d, 0.012 + (n % 5) * 0.002, Math.sin(a) * d);

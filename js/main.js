@@ -9,7 +9,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as T from './textures.js';
 import { buildWorld, TABLE_Y } from './world.js';
 import { Character } from './characters.js';
-import { Cards, Particles, addButt } from './fx.js';
+import { Cards, Particles, addButt, makeButt } from './fx.js';
 import { Audio } from './audio.js';
 import { Net } from './net.js';
 import { CHARS, RANK_TABLE, RANK_MANY, RANK_ONE, SHOTS, canCall } from './engine.js';
@@ -110,7 +110,20 @@ async function boot() {
   setP(70, 'Наливаем Чеколейтор…');
   await nextFrame();
   for (let i = 0; i < 10; i++) stepChars(1 / 30, i / 30);
+  // прогрев: всё, что появляется посреди партии, компилируется сейчас, а не во время игры
+  const warm = new THREE.Group();
+  for (const r of ['K', 'Q', 'A', 'J']) warm.add(cards.make(r));
+  warm.add(makeButt());
+  const pud = new THREE.Mesh(particles.puddleGeo, particles.puddleM); warm.add(pud);
+  warm.position.set(0, TABLE_Y + 0.05, 0);
+  scene.add(warm);
+  chars.forEach((c) => { c.cig.visible = true; });
+  particles.smokes[0].visible = true;
   renderer.compile(scene, camera);
+  composer.render(0.016);
+  scene.remove(warm);
+  chars.forEach((c) => { c.cig.visible = false; });
+  particles.smokes[0].visible = false;
   setP(88, 'Зажигаем гирлянды…');
   await nextFrame();
   renderPortraits();
@@ -192,7 +205,7 @@ const nmFull = (i) => (G.st && G.st.seats[i] ? G.st.seats[i].nm || CHARS[i].name
 function myName() {
   const v = $('nameIn').value.trim().slice(0, 16);
   if (v) store.set('name', v);
-  return v || 'Гость';
+  return v || 'Игрок';
 }
 
 async function goOnline(create) {
@@ -740,7 +753,7 @@ function loop() {
     if (G.screen === 'lobby') p.set(-2.6 + Math.sin(t * 0.1) * 0.4, 1.75, 1.6 + Math.sin(t * 0.08) * 0.3);
     camera.position.lerp(p, snap ? 1 : Math.min(1, dt * 0.8));
     const look = G.screen === 'lobby' ? V(0.2, 1.0, 0) : V(0.35, 0.98, -0.25);
-    look.x += G.look.x * 0.6; look.y -= G.look.y * 0.3;
+    look.x -= G.look.x * 0.6; look.y -= G.look.y * 0.3;
     const m = new THREE.Matrix4().lookAt(camera.position, look, V(0, 1, 0));
     tmpQ.setFromRotationMatrix(m);
     camera.quaternion.slerp(tmpQ, snap ? 1 : Math.min(1, dt * 2));
@@ -772,18 +785,21 @@ function loop() {
 }
 
 // ---------- ввод ----------
-addEventListener('pointermove', (e) => {
-  if (e.pointerType !== 'mouse' || e.target !== canvas) return;
-  G.look.tx = clamp((e.clientX / innerWidth) * 2 - 1, -1, 1);
-  G.look.ty = clamp(((e.clientY / innerHeight) * 2 - 1) * 1.1, -1, 0.45);
-});
+// Осмотр: зажми кнопку мыши (или палец) и тяни. Тянешь вправо — смотришь вправо.
 let drag = null;
-canvas.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') drag = { x: e.clientX, y: e.clientY, lx: G.look.tx, ly: G.look.ty }; });
-addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('pointerdown', (e) => {
+  drag = { x: e.clientX, y: e.clientY, lx: G.look.tx, ly: G.look.ty, id: e.pointerId };
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* не критично */ }
+  canvas.classList.add('dragging');
+});
+const endDrag = () => { drag = null; canvas.classList.remove('dragging'); };
+addEventListener('pointerup', endDrag);
+addEventListener('pointercancel', endDrag);
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  G.look.tx = clamp(drag.lx - (e.clientX - drag.x) / innerWidth * 2.2, -1, 1);
-  G.look.ty = clamp(drag.ly - (e.clientY - drag.y) / innerHeight * 2.2, -1, 0.45);
+  if (!drag || e.pointerId !== drag.id) return;
+  G.look.tx = clamp(drag.lx - (e.clientX - drag.x) / innerWidth * 2.4, -1, 1);
+  G.look.ty = clamp(drag.ly + (e.clientY - drag.y) / innerHeight * 2.4, -1, 0.45);
 });
 
 addEventListener('keydown', (e) => {

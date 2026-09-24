@@ -819,6 +819,19 @@ export class Character {
       applyHandPose(arm.fingers, arm.pose);
     }
 
+    // веер карт всегда в ладонях: ставим его между кистями
+    if (this.fanGroup) {
+      const pl = this.arm.L.hand.localToWorld(V(0, -0.05, 0.025));
+      const pr = this.arm.R.hand.localToWorld(V(0, -0.05, 0.025));
+      const mid = pl.add(pr).multiplyScalar(0.5);
+      this.torso.updateMatrixWorld(true);
+      const loc = this.torso.worldToLocal(mid);
+      loc.y -= 0.012;
+      if (this.fanSnap || this.fanGroup.position.distanceTo(loc) > 0.25) this.fanGroup.position.copy(loc);
+      else this.fanGroup.position.lerp(loc, 1 - Math.pow(0.00001, dt));
+      this.fanSnap = false;
+    }
+
     // сигарета в руке
     if (this.cig.visible && this.cigPose) {
       const hnd = this.arm.L.hand;
@@ -831,7 +844,6 @@ export class Character {
       this.cig.position.copy(pinch.sub(V(0, 0, 0.012).applyQuaternion(qc)));
       const glow = this.cigGlow || 0.3;
       this.cig.userData.ember.material.emissiveIntensity = 2 + glow * 10;
-      this.cig.userData.light.intensity = 0.05 + glow * 0.35;
       if (Math.random() < dt * 14) {
         const tip = this.cig.localToWorld(V(0, 0, 0.085));
         this.fx.smoke(tip, V((Math.random() - 0.5) * 0.02, 0.09, 0), 0.012, 2.6, 0.12);
@@ -901,8 +913,6 @@ function buildCig() {
   paper.rotation.x = Math.PI / 2; paper.position.z = 0.053; g.add(paper);
   const ember = new THREE.Mesh(new THREE.CylinderGeometry(0.0043, 0.0043, 0.005, 12), new THREE.MeshStandardMaterial({ color: '#ff5a1a', emissive: '#ff3a00', emissiveIntensity: 4 }));
   ember.rotation.x = Math.PI / 2; ember.position.z = 0.084; g.add(ember);
-  const light = new THREE.PointLight('#ff6a2a', 0.2, 0.6, 2);
-  light.position.z = 0.09; g.add(light);
-  g.userData = { ember, light };
+  g.userData = { ember };
   return g;
 }
