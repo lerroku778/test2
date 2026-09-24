@@ -22,6 +22,8 @@ export class Audio {
     this.mus = c.createGain(); this.mus.gain.value = 0.22; this.mus.connect(this.master);
     // реверб
     this.verb = c.createConvolver();
+    // шина гитары: и сухой звук, и эхо идут через неё, чтобы в игре гитара глохла полностью
+    this.gtr = c.createGain(); this.gtr.connect(this.mus); this.gtr.connect(this.verb);
     const len = c.sampleRate * 1.8, ir = c.createBuffer(2, len, c.sampleRate);
     for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
     this.verb.buffer = ir;
@@ -87,8 +89,8 @@ export class Audio {
   applyMusic() {
     const c = this.ctx; if (!c) return;
     const t = c.currentTime;
-    this.mus.gain.cancelScheduledValues(t);
-    this.mus.gain.setTargetAtTime(this.music && !this.inGame ? 0.22 : 0, t, 0.6);
+    this.gtr.gain.cancelScheduledValues(t);
+    this.gtr.gain.setTargetAtTime(this.music && !this.inGame ? 1 : 0, t, 0.6);
     if (this.inGame && this.music && this.trackBuf) this.speakerOn();
     else this.speakerOff();
   }
@@ -287,13 +289,15 @@ export class Audio {
     let next = c.currentTime + 0.5;
     const sched = () => {
       if (!this.ctx) return;
+      // в игре играет колонка — гитару не планируем вовсе
+      if (!this.music || this.inGame) { next = Math.max(next, c.currentTime + 0.5); setTimeout(sched, 200); return; }
       while (next < c.currentTime + 0.6) {
         const notes = prog[bar % prog.length];
         const m = notes[step];
         const src = c.createBufferSource(); src.buffer = this.pluckBuf(N(m));
         const g = c.createGain(); g.gain.value = step === 0 ? 0.5 : 0.28 + Math.random() * 0.08;
         const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400;
-        src.connect(lp); lp.connect(g); g.connect(this.mus); g.connect(this.verb);
+        src.connect(lp); lp.connect(g); g.connect(this.gtr);
         src.start(next + (Math.random() - 0.5) * 0.015);
         next += beat * (step % 2 ? 0.95 : 1.05);
         step++;
