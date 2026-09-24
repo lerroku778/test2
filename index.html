@@ -2,7 +2,10 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Ублюдский бар</title>
 <meta name="description" content="Ублюдский бар: 3D-карточная игра на блеф. Кто соврал — пьёт Чеколейтор.">
 <meta name="theme-color" content="#120d0b">
@@ -30,7 +33,9 @@
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--bone); font-family: var(--body); -webkit-font-smoothing: antialiased; }
-  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  /* панели с прокруткой листаются пальцем, остальное (3D) пальцем не скроллится и не зумится */
+  #menu .panel, #lobby .panel, #pause .panel, #rules .panel { touch-action: pan-y; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
   body.locked, body.locked * { cursor: none !important; }
   body:not(.touch) .touch-only { display: none !important; }
@@ -68,7 +73,7 @@
 
   /* ---------- меню ---------- */
   #menu { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; padding: 24px clamp(16px, 5vw, 72px); pointer-events: none; }
-  #menu .panel { pointer-events: auto; width: min(460px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 32px 30px; display: grid; gap: 16px; }
+  #menu .panel { pointer-events: auto; width: min(460px, 100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow: auto; padding: 32px 30px; display: grid; gap: 16px; }
   .brand { display: grid; gap: 4px; }
   .brand h1 { font: 400 clamp(44px, 7vw, 68px)/0.88 var(--display); margin: 0; color: var(--amber); text-shadow: 0 2px 0 #5a2c0a, 0 0 30px rgba(233,164,67,0.3); }
   .brand .sub { font: 400 20px var(--serif); color: var(--bone); opacity: 0.9; }
@@ -93,7 +98,7 @@
 
   /* ---------- лобби ---------- */
   #lobby { position: fixed; inset: 0; z-index: 20; display: grid; place-items: end center; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); pointer-events: none; }
-  #lobby .panel { pointer-events: auto; width: min(1040px, 100%); padding: 22px; display: grid; gap: 18px; }
+  #lobby .panel { pointer-events: auto; width: min(1040px, 100%); max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow: auto; padding: 22px; display: grid; gap: 18px; }
   .lobby-head { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
   .code { display: flex; align-items: center; gap: 14px; }
   .code b { font: 700 34px var(--mono); letter-spacing: 0.18em; color: var(--amber-hi); }
@@ -113,6 +118,8 @@
   .char.mine { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber), 0 10px 40px rgba(233,164,67,0.35); }
   .char.taken:not(.mine) { opacity: 0.55; }
   .lobby-foot { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  /* кнопки «Выйти / Начать» всегда на виду, даже если лобби не влезло в экран */
+  .lobby-foot { position: sticky; bottom: -22px; z-index: 2; margin: 0 -22px -22px; padding: 12px 22px 18px; background: linear-gradient(180deg, rgba(20,14,11,0.55), rgba(20,14,11,0.97) 35%); border-radius: 0 0 20px 20px; }
   .people { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--muted); align-items: center; }
   .chip { padding: 5px 10px; border-radius: 99px; background: rgba(255,255,255,0.06); color: var(--bone); }
   .chip.me { background: rgba(233,164,67,0.18); color: var(--amber-hi); }
@@ -168,7 +175,7 @@
 
   /* пауза (Esc) */
   #pause { position: fixed; inset: 0; z-index: 36; display: grid; place-items: center; padding: 16px; background: rgba(8,5,4,0.55); }
-  #pause .panel { width: min(520px, 100%); max-height: 92vh; overflow: auto; padding: 26px 26px 22px; display: grid; gap: 12px; }
+  #pause .panel { width: min(520px, 100%); max-height: 92vh; max-height: 92dvh; overflow: auto; padding: 26px 26px 22px; display: grid; gap: 12px; }
   #pause h2 { font: 400 clamp(32px, 5vw, 44px)/0.95 var(--display); margin: 0; color: var(--amber); }
   #pause .sub { color: var(--muted); margin: -4px 0 4px; font-size: 14px; }
   .sens { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; }
@@ -221,7 +228,7 @@
 
   /* ---------- правила ---------- */
   #rules { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: rgba(8,5,4,0.7); }
-  #rules .panel { width: min(620px, 100%); max-height: 86vh; overflow: auto; padding: 28px; display: grid; gap: 12px; }
+  #rules .panel { width: min(620px, 100%); max-height: 86vh; max-height: 86dvh; overflow: auto; padding: 28px; display: grid; gap: 12px; }
   #rules h2 { font: 400 40px var(--display); color: var(--amber); margin: 0; }
   #rules ol { margin: 0; padding-left: 20px; display: grid; gap: 10px; line-height: 1.55; color: var(--bone); max-width: 62ch; }
   #rules kbd { font: 600 12px var(--mono); padding: 2px 6px; border-radius: 5px; background: rgba(255,255,255,0.08); border: 1px solid var(--line); }
@@ -251,6 +258,54 @@
     .smoke { padding: 8px; }
     .feed { display: none; }
     .tablebadge .t1 { font-size: 20px; }
+  }
+
+  /* ---------- телефон и планшет ---------- */
+  body.touch input { font-size: 16px; } /* иначе iOS зумит страницу при фокусе */
+  body.touch .links .fps input { font-size: 16px; width: 72px; }
+  body.touch .roomtag { top: calc(8px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left)); padding: 5px 9px; font-size: 11px; }
+  body.touch .tablebadge { top: calc(8px + env(safe-area-inset-top)); padding: 5px 12px 5px 5px; gap: 8px; border-radius: 12px; }
+  body.touch .tablebadge img { width: 26px; height: 37px; }
+  body.touch .tablebadge .t1 { font-size: 19px; }
+  body.touch .tablebadge .t2 { font-size: 10px; margin-top: 1px; }
+  body.touch .status { top: calc(58px + env(safe-area-inset-top)); font-size: 13px; padding: 7px 14px; max-width: min(calc(100vw - 24px), 560px); }
+  body.touch .timer { top: calc(92px + env(safe-area-inset-top)); width: 160px; }
+  body.touch .me-panel { display: grid; top: calc(40px + env(safe-area-inset-top)); left: calc(8px + env(safe-area-inset-left)); padding: 7px 10px; min-width: 0; gap: 3px; border-radius: 12px; }
+  body.touch .me-panel .nm { font-size: 16px; }
+  body.touch .me-panel .label { font-size: 9px; }
+  body.touch .plate .nm { font-size: 12px; padding: 3px 9px; }
+  body.touch .icons { position: fixed; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); gap: 6px; }
+  body.touch .ic { width: 38px; height: 38px; border-radius: 11px; }
+  body.touch .side { left: calc(12px + env(safe-area-inset-left)); right: auto; bottom: calc(12px + env(safe-area-inset-bottom)); justify-items: start; }
+  body.touch .smoke { padding: 8px 12px 8px 8px; }
+  body.touch .smoke img { width: 26px; height: 39px; }
+  body.touch .actions { left: auto; right: calc(12px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom)); transform: none; flex-direction: column-reverse; gap: 10px; }
+  body.touch .actions .btn { min-width: 150px; padding: 13px 18px; font-size: 16px; }
+  body.touch #liarBtn { font-size: 22px; }
+  body.touch #aim { display: none; }
+  @media (orientation: portrait) {
+    body.touch .roomtag { display: none; }
+    body.touch .tablebadge { left: calc(8px + env(safe-area-inset-left)); transform: none; }
+    body.touch .me-panel { top: calc(110px + env(safe-area-inset-top)); }
+    body.touch .actions { left: calc(12px + env(safe-area-inset-left)); flex-direction: row; }
+    body.touch .actions .btn { flex: 1; min-width: 0; }
+    body.touch .side { bottom: calc(76px + env(safe-area-inset-bottom)); }
+    body.touch .smoke .t { display: none; }
+  }
+  @media (max-height: 560px) {
+    #lobby { padding: 8px; place-items: center; }
+    #lobby .panel { padding: 14px; gap: 10px; max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); }
+    .lobby-foot { bottom: -14px; margin: 0 -14px -14px; padding: 10px 14px 12px; }
+    .chars { gap: 8px; }
+    .char img { aspect-ratio: 16 / 10; object-position: 50% 22%; }
+    .char .info { padding: 14px 8px 6px; }
+    .char .nm, .chars.pick .char .nm { font-size: 16px; }
+    .char .who { margin-top: 2px; font-size: 12px; }
+    .code b { font-size: 26px; }
+    #menu { padding: 8px clamp(12px, 4vw, 48px); }
+    #menu .panel { padding: 18px 20px; gap: 11px; max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); }
+    .brand h1 { font-size: 40px; }
+    #pause .panel { padding: 18px 20px 16px; gap: 9px; }
   }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
@@ -308,7 +363,7 @@
       <div class="lobby-tod"><div class="label">Время суток</div><div class="seg" id="todLobby"><button data-tod="day">День</button><button data-tod="evening">Вечер</button><button data-tod="night">Ночь</button></div></div>
       <div class="people" id="people"></div>
     </div>
-    <div class="label">Места за столом — кликни, чтобы сесть или встать</div>
+    <div class="label">Места за столом — нажми, чтобы сесть или встать</div>
     <div class="chars" id="seats"></div>
     <div class="label">Твой персонаж</div>
     <div class="chars pick" id="chars"></div>
@@ -349,7 +404,7 @@
       <button class="ic" id="musBtn" title="Музыка"><svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg></button>
       <button class="ic" id="fsBtn" title="Во весь экран"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
       <button class="ic" id="helpBtn" title="Правила"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14"/><path d="M12 17.5v.01"/></svg></button>
-      <button class="ic" id="exitBtn" title="В меню"><svg viewBox="0 0 24 24"><path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/></svg></button>
+      <button class="ic" id="setBtn" title="Настройки и выход"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
     </div>
   </div>
 </section>
@@ -362,9 +417,14 @@
     <button id="resumeBtn" class="btn">Вернуться за стол</button>
     <div class="row"><button id="pSnd" class="btn ghost">Звук: вкл</button><button id="pMus" class="btn ghost">Музыка: вкл</button></div>
     <div class="row"><button id="pFs" class="btn ghost">Во весь экран</button><button id="pRules" class="btn ghost">Правила</button></div>
-    <div class="sens"><label class="label" for="sensIn">Чувствительность мыши</label><b id="sensVal">1.0</b><input type="range" id="sensIn" min="0.25" max="3" step="0.05" value="1"></div>
+    <div class="sens"><label class="label" for="sensIn" id="sensLabel">Чувствительность мыши</label><b id="sensVal">1.0</b><input type="range" id="sensIn" min="0.25" max="3" step="0.05" value="1"></div>
     <div class="sens"><label class="label" for="fpsIn2">Лимит FPS (пусто — без лимита, до 1000)</label><input class="fpsIn field" id="fpsIn2" type="number" min="0" max="1000" step="1" inputmode="numeric" placeholder="∞"></div>
-    <div class="binds">
+    <div class="binds touch-only">
+      <div><kbd>Тянуть</kbd></div><div>смотреть по сторонам</div>
+      <div><kbd>Тап</kbd></div><div>по карте — взять или вернуть · по столу — выложить · по игроку — «Лжец!»</div>
+      <div><kbd>2 пальца</kbd></div><div>приглядеться (зум, пока держишь)</div>
+    </div>
+    <div class="binds desk-only">
       <div><kbd>Мышь</kbd></div><div>смотреть по сторонам</div>
       <div><kbd>ЛКМ</kbd></div><div>взять карту под прицелом · по столу — выложить · по игроку — «Лжец!»</div>
       <div><kbd>1</kbd>–<kbd>5</kbd></div><div>взять карту по номеру (слева направо)</div>
@@ -409,7 +469,8 @@
       <li>Если карты остались только у одного игрока, следующий обязан его вскрыть.</li>
       <li>Последний живой за столом забирает бар.</li>
     </ol>
-    <p style="color:var(--muted);margin:0">Мышь — смотреть, <kbd>ЛКМ</kbd> по карте — взять её, <kbd>1</kbd>–<kbd>5</kbd> — то же по номеру, <kbd>Пробел</kbd> — выложить, <kbd>Q</kbd> — лжец, <kbd>E</kbd> — закурить, <kbd>ПКМ</kbd> — приглядеться, <kbd>Esc</kbd> — пауза.</p>
+    <p class="touch-only" style="color:var(--muted);margin:0">Тяни пальцем — смотреть, тап по карте — взять её, тап по столу или «Выложить» — сходить, тап по игроку или «ЛЖЕЦ!» — вскрыть, двумя пальцами — приглядеться.</p>
+    <p class="desk-only" style="color:var(--muted);margin:0">Мышь — смотреть, <kbd>ЛКМ</kbd> по карте — взять её, <kbd>1</kbd>–<kbd>5</kbd> — то же по номеру, <kbd>Пробел</kbd> — выложить, <kbd>Q</kbd> — лжец, <kbd>E</kbd> — закурить, <kbd>ПКМ</kbd> — приглядеться, <kbd>Esc</kbd> — пауза.</p>
     <button id="rulesClose" class="btn" style="justify-self:start">Понятно</button>
   </div>
 </section>

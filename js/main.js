@@ -25,7 +25,8 @@ const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 const esc = (s) => String(s ?? '');
 
 // ---------- рендер ----------
-const isMobile = matchMedia('(pointer: coarse)').matches;
+// телефон или планшет: основной ввод — палец (у ноутбука с сенсорным экраном основной ввод — мышь)
+const isMobile = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && matchMedia('(hover: none)').matches);
 let quality = store.get('gfx', isMobile ? 'mid' : 'high');
 const Q = { high: { pr: 1.75, samples: 4, shadow: 2048 }, mid: { pr: 1.25, samples: 0, shadow: 1024 }, low: { pr: 0.9, samples: 0, shadow: 512 } }[quality] || { pr: 1.25, samples: 0, shadow: 1024 };
 
@@ -45,11 +46,15 @@ scene.background = new THREE.Color('#0c0907');
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.02, 200);
 camera.position.set(4, 1.8, -5);
 
+// Не все мобильные GPU умеют рисовать в half float: там кадр идёт в обычные 8 бит и без bloom
+// (его цели тоже half float) — иначе был бы чёрный экран.
+const halfOK = renderer.extensions.has('EXT_color_buffer_half_float') || renderer.extensions.has('EXT_color_buffer_float');
 // в R.E.P.O. кадр всё равно пикселизуется крупными клетками — сглаживание там ничего не даёт
-const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: THREE.HalfFloatType, samples: STYLE === 'repo' ? 0 : Q.samples });
+const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: halfOK ? THREE.HalfFloatType : THREE.UnsignedByteType, samples: STYLE === 'repo' ? 0 : Q.samples });
 const composer = new EffectComposer(renderer, rt);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.45, 2.2);
+bloom.enabled = halfOK;
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 const grade = new StylePass(scene, camera, STYLE);
@@ -188,6 +193,12 @@ function showScreen(s) {
   for (const id of ['menu', 'lobby', 'hud']) $(id).classList.toggle('hidden', id !== s);
   if (s !== 'hud') { $('over').classList.add('hidden'); unlock(); }
   if (s === 'menu') { G.camMode = 'orbit'; $('nameIn').value = $('nameIn').value || store.get('name', ''); }
+  if (s !== 'hud') G.touchPause = false;
+  if (s === 'hud' && isMobile && !G.touchHint) {
+    G.touchHint = true;
+    const portrait = innerHeight > innerWidth;
+    toast(`Тяни пальцем — смотреть · тап по карте — взять · тап по столу или «Выложить» — сходить${portrait ? ' · удобнее держать телефон горизонтально' : ''}`, 6500);
+  }
   updatePause();
 }
 
@@ -209,9 +220,15 @@ document.addEventListener('pointerlockchange', () => {
 document.addEventListener('pointerlockerror', () => updatePause());
 
 function updatePause() {
-  const show = G.screen === 'hud' && !G.locked && !isMobile && $('over').classList.contains('hidden') && $('rules').classList.contains('hidden');
+  // на телефоне захвата мыши нет: пауза — это экран настроек, его открывает шестерёнка
+  const show = G.screen === 'hud' && (isMobile ? !!G.touchPause : !G.locked) && $('over').classList.contains('hidden') && $('rules').classList.contains('hidden');
   const el = $('pause');
-  if (show && el.classList.contains('hidden')) {
+  if (show && isMobile) {
+    $('pauseLabel').textContent = 'Настройки';
+    $('pauseTitle').textContent = 'Пауза';
+    $('pauseSub').textContent = 'Партия идёт без остановки.';
+    $('resumeBtn').textContent = 'Вернуться за стол';
+  } else if (show && el.classList.contains('hidden')) {
     const first = !G.wasLocked;
     $('pauseLabel').textContent = first ? 'Партия началась' : 'Пауза';
     $('pauseTitle').textContent = first ? 'Садись за стол' : 'Ты отошёл от стола';
@@ -806,7 +823,10 @@ function updatePlates() {
     if (el._op !== op) { el._op = op; el.style.opacity = op; }
     if (!vis) return;
     // только transform: без перерасчёта раскладки страницы каждый кадр
-    const x = Math.round(clamp((p.x * 0.5 + 0.5) * w, 90, w - 90)), y = Math.round(clamp((-p.y * 0.5 + 0.5) * h, 190, h - 250));
+    // поля сверху и снизу — под HUD; на низком экране (телефон горизонтально) они пропорционально меньше,
+    // на телефоне верхний HUD компактный — табличке хватает места сразу под статусом и таймером
+    const top = isMobile ? 150 : Math.min(190, h * 0.3);
+    const x = Math.round(clamp((p.x * 0.5 + 0.5) * w, 90, w - 90)), y = Math.round(clamp((-p.y * 0.5 + 0.5) * h, top, Math.max(top, h - Math.min(250, h * 0.3))));
     const tr = `translate3d(${x}px, ${y}px, 0) translate(-50%, -100%)`;
     if (el._tr !== tr) { el._tr = tr; el.style.transform = tr; }
   });
@@ -989,7 +1009,12 @@ function loop(now) {
     G.shake = Math.max(0, G.shake - dt * 1.4);
     camera.position.add(V((Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0).multiplyScalar(G.shake));
   }
+  // узкий экран (телефон вертикально): расширяем вертикальный угол, чтобы по горизонтали
+  // влезали стол и карты в руке; на обычных экранах ничего не меняется
+  const fovSet = camera.fov;
+  if (camera.aspect < 1.25) camera.fov = Math.min(95, 2 * THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(fovSet) / 2) * 1.25 / camera.aspect)));
   camera.updateProjectionMatrix();
+  camera.fov = fovSet;
   camera.updateMatrixWorld();
 
   // куда смотрю — остальным игрокам (не чаще ~8 раз в секунду и только если голова повернулась)
@@ -1004,7 +1029,8 @@ function loop(now) {
   // карты в руке и то, на что смотрит прицел
   const fpPlay = G.camMode === 'fp' && G.screen === 'hud' && G.mySeat >= 0;
   if (G.mySeat >= 0) cards.updateHand(G.mySeat, dt, camera.position, fpPlay ? G.hover : -1, G.sel);
-  if (fpPlay) updateAim(); else if (G.aim || G.hover >= 0) { G.aim = null; G.aimKey = ''; G.hover = -1; renderAim(); }
+  // прицел по центру экрана — только с мышью; на сенсорном экране цель — точка касания
+  if (fpPlay && !isMobile) updateAim(); else if (G.aim || G.hover >= 0) { G.aim = null; G.aimKey = ''; G.hover = -1; renderAim(); }
 
   // свет: мерцание гирлянд
   world.flicker.forEach((f) => { f.l.intensity = f.base * (0.92 + Math.sin(time * 3 + f.ph) * 0.04 + Math.sin(time * 11.3 + f.ph * 2) * 0.03); });
@@ -1068,31 +1094,41 @@ canvas.addEventListener('mousedown', (e) => {
 document.addEventListener('mouseup', (e) => { if (e.button === 2) G.zoom = false; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-// Сенсорный экран: тянешь — смотришь, тап — действие с тем, что под пальцем.
+// Сенсорный экран: тянешь — смотришь, тап — действие с тем, что под пальцем,
+// второй палец — приглядеться (зум, пока держишь).
 let touch = null;
+const fingers = new Set();
 canvas.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'mouse') return;
-  touch = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, moved: false };
+  audio.init();
+  fingers.add(e.pointerId);
+  if (fingers.size >= 2) { G.zoom = true; if (touch) touch.moved = true; return; }
+  touch = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, moved: false, t: performance.now() };
   try { canvas.setPointerCapture(e.pointerId); } catch { /* не критично */ }
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!touch || e.pointerId !== touch.id) return;
-  const k = 0.005 * G.sens;
+  const k = 0.005 * G.sens * (G.zoom ? 0.55 : 1);
   G.look.yaw = clamp(G.look.yaw - (e.clientX - touch.x) * k, -YAW_MAX, YAW_MAX);
   G.look.pitch = clamp(G.look.pitch + (e.clientY - touch.y) * k, PITCH_MIN, PITCH_MAX);
   touch.x = e.clientX; touch.y = e.clientY;
-  if (Math.hypot(e.clientX - touch.sx, e.clientY - touch.sy) > 10) touch.moved = true;
+  if (Math.hypot(e.clientX - touch.sx, e.clientY - touch.sy) > 12) touch.moved = true;
 });
 const endTouch = (e) => {
+  fingers.delete(e.pointerId);
+  if (fingers.size < 2) G.zoom = false;
   if (!touch || e.pointerId !== touch.id) return;
-  if (!touch.moved && inHud() && G.camMode === 'spect') nextSpot();
-  else if (!touch.moved && inHud() && G.camMode === 'fp') {
+  const tap = !touch.moved && performance.now() - touch.t < 600;
+  if (tap && inHud() && G.camMode === 'spect') nextSpot();
+  else if (tap && inHud() && G.camMode === 'fp') {
     primaryAction(updateAim(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)));
+    // подсказка у прицела на телефоне не нужна: цель — там, куда ткнул
+    G.aim = null; G.aimKey = ''; G.hover = -1; renderAim();
   }
   touch = null;
 };
 canvas.addEventListener('pointerup', endTouch);
-canvas.addEventListener('pointercancel', () => { touch = null; });
+canvas.addEventListener('pointercancel', (e) => { fingers.delete(e.pointerId); if (fingers.size < 2) G.zoom = false; if (touch && touch.id === e.pointerId) touch = null; });
 
 function nextSpot() { G.specSpot = (G.specSpot + 1) % 4; G.look = { ...LOOK0 }; }
 
@@ -1153,7 +1189,15 @@ $('todLobby').addEventListener('click', (e) => {
 
 function toggleSound() { audio.init(); audio.setMuted(!audio.muted); syncAudioBtns(); }
 function toggleMusic() { audio.init(); audio.setMusic(!audio.music); syncAudioBtns(); }
-function toggleFs() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(() => {}); }
+function toggleFs() {
+  if (document.fullscreenElement) { document.exitFullscreen(); return; }
+  const p = document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+  // на телефоне во весь экран заодно фиксируем горизонтальную ориентацию (где браузер это умеет)
+  if (p) p.then(() => { if (isMobile) screen.orientation?.lock?.('landscape').catch(() => {}); }).catch(() => {});
+}
+// на iPhone полноэкранного режима для страниц нет — кнопки не показываем
+if (!document.fullscreenEnabled) for (const id of ['fsBtn', 'pFs']) $(id).classList.add('hidden');
+if (isMobile) $('sensLabel').textContent = 'Чувствительность';
 function syncAudioBtns() {
   $('sndBtn').classList.toggle('off', audio.muted);
   $('musBtn').classList.toggle('off', !audio.music);
@@ -1197,7 +1241,6 @@ $('createBtn').addEventListener('click', () => goOnline(true));
 $('joinBtn').addEventListener('click', () => goOnline(false));
 $('soloBtn').addEventListener('click', goSolo);
 $('leaveBtn').addEventListener('click', leave);
-$('exitBtn').addEventListener('click', leave);
 $('menuBtn2').addEventListener('click', leave);
 $('startBtn').addEventListener('click', () => { audio.init(); net.send({ t: 'start' }); });
 $('againBtn').addEventListener('click', () => { net.send({ t: 'again' }); $('over').classList.add('hidden'); updatePause(); lock(); });
@@ -1208,8 +1251,10 @@ $('rulesBtn').addEventListener('click', openRules);
 $('helpBtn').addEventListener('click', openRules);
 $('rulesClose').addEventListener('click', closeRules);
 $('rules').addEventListener('click', (e) => { if (e.target.id === 'rules') closeRules(); });
-$('resumeBtn').addEventListener('click', lock);
-$('pause').addEventListener('click', (e) => { if (e.target.id === 'pause') lock(); });
+const resume = () => { if (isMobile) { G.touchPause = false; updatePause(); } else lock(); };
+$('resumeBtn').addEventListener('click', resume);
+$('pause').addEventListener('click', (e) => { if (e.target.id === 'pause') resume(); });
+$('setBtn').addEventListener('click', () => { G.touchPause = true; updatePause(); });
 $('pSnd').addEventListener('click', toggleSound);
 $('pMus').addEventListener('click', toggleMusic);
 $('pFs').addEventListener('click', toggleFs);
