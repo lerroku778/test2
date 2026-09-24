@@ -15,6 +15,8 @@ export const CHARS = [
   { key: 'priest', name: 'Коджлад', tag: 'Всё видел, всё знает' },
 ];
 
+export const TODS = ['day', 'evening', 'night'];
+
 export const TIMES = { deal: 2600, turn: 45000, reveal: 4200, drink: 7600 };
 
 const rid = () => Math.random().toString(36).slice(2, 10);
@@ -35,7 +37,7 @@ export function newLobby() {
   return {
     gid: rid(), seq: 1, ph: 'lobby', seats: [0, 1, 2, 3].map(emptySeat),
     round: 0, table: 'K', turn: -1, last: null, pile: 0, rev: null, dr: null,
-    win: -1, now: Date.now(), dl: 0, ev: null, people: [],
+    win: -1, now: Date.now(), dl: 0, ev: null, people: [], tod: 'evening',
   };
 }
 

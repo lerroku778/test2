@@ -68,7 +68,7 @@
 
   /* ---------- меню ---------- */
   #menu { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; padding: 24px clamp(16px, 5vw, 72px); pointer-events: none; }
-  #menu .panel { pointer-events: auto; width: min(460px, 100%); padding: 32px 30px; display: grid; gap: 18px; }
+  #menu .panel { pointer-events: auto; width: min(460px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 32px 30px; display: grid; gap: 16px; }
   .brand { display: grid; gap: 4px; }
   .brand h1 { font: 400 clamp(44px, 7vw, 68px)/0.88 var(--display); margin: 0; color: var(--amber); text-shadow: 0 2px 0 #5a2c0a, 0 0 30px rgba(233,164,67,0.3); }
   .brand .sub { font: 400 20px var(--serif); color: var(--bone); opacity: 0.9; }
@@ -78,6 +78,11 @@
   .or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
   .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   #menuErr { color: #ff9b8f; font-size: 14px; min-height: 1em; line-height: 1.4; }
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px; border-radius: 12px; background: rgba(0,0,0,0.3); border: 1px solid var(--line); }
+  .seg button { padding: 9px 6px; border-radius: 9px; font-weight: 700; font-size: 14px; color: var(--muted); transition: background .15s, color .15s; }
+  .seg button:hover { color: var(--bone); }
+  .seg button.on { background: linear-gradient(180deg, #f2b456, #c67f22); color: #1c1006; }
+  .lobby-tod { display: grid; gap: 6px; min-width: 260px; }
   .links { display: flex; gap: 18px; font-size: 14px; color: var(--muted); }
   .links button { text-decoration: underline; text-underline-offset: 3px; }
 
@@ -264,6 +269,8 @@
     </div>
     <label class="label" for="nameIn">Как тебя звать</label>
     <input id="nameIn" class="field" maxlength="16" placeholder="Имя за столом" autocomplete="off">
+    <div class="label">Время суток</div>
+    <div class="seg" id="todMenu"><button data-tod="day">День</button><button data-tod="evening">Вечер</button><button data-tod="night">Ночь</button></div>
     <button id="createBtn" class="btn">Создать комнату</button>
     <div class="or">или войти по коду</div>
     <div class="row">
@@ -283,6 +290,7 @@
         <div class="label">Комната</div>
         <div class="code"><b id="roomCode">—</b><button id="copyBtn" class="btn ghost" style="padding:10px 14px">Скопировать ссылку</button></div>
       </div>
+      <div class="lobby-tod"><div class="label">Время суток</div><div class="seg" id="todLobby"><button data-tod="day">День</button><button data-tod="evening">Вечер</button><button data-tod="night">Ночь</button></div></div>
       <div class="people" id="people"></div>
     </div>
     <div class="label">Выбери место за столом</div>

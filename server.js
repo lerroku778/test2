@@ -71,7 +71,7 @@ wss.on('connection', (ws) => {
       if (m.create || !code) {
         if (rooms.size >= MAX_ROOMS) { send(pid, { t: 'err', e: 'Сервер заполнен, попробуй позже' }); return; }
         code = newCode();
-        rooms.set(code, new Room(code, send));
+        rooms.set(code, new Room(code, send, m.tod));
       }
       room = rooms.get(code);
       if (!room) { send(pid, { t: 'err', e: 'Комната ' + code + ' не найдена' }); return; }

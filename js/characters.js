@@ -563,7 +563,9 @@ export class Character {
       const tip = new THREE.Mesh(new THREE.ConeGeometry(0.0105, 0.016, 12), hm); tip.rotation.z = Math.PI; tip.position.y = -0.006; heart.add(tip);
     } else if (key === 'priest') hair = curls(H, c, '#4a2e1c', { n: 330, longN: 50, long: 0.06, seed: 11, size: 0.82, faceOpen: 0.45, top: 0.2 });
     else {
-      const hm = mat({ color: '#d8cfb8', roughness: 0.45, sheen: 1, sheenColor: new THREE.Color('#fff6dd'), sheenRoughness: 0.3 });
+      // тёмно-русое каре: раньше цвет почти совпадал с бледной кожей, и в мульт-стиле
+      // (три ступени света) волосы сливались с головой — казалось, что их нет
+      const hm = mat({ color: '#a8895a', roughness: 0.45, sheen: 1, sheenColor: new THREE.Color('#ffe2a8'), sheenRoughness: 0.3, side: THREE.DoubleSide });
       const cap = new THREE.Mesh(new THREE.SphereGeometry(0.158, 40, 24, 0, Math.PI * 2, 0, Math.PI * 0.52), hm);
       cap.position.copy(c).add(V(0, 0.015, -0.01));
       cap.scale.set(0.93, 1.2, 1.0);
@@ -580,7 +582,6 @@ export class Character {
       prof.push(new THREE.Vector2(0.21, prof[prof.length - 1].y - 0.01));
       prof.push(new THREE.Vector2(0.16, prof[prof.length - 1].y + 0.005));
       const bob = new THREE.Mesh(new THREE.LatheGeometry(prof, 48, 0.95, Math.PI * 2 - 1.9), hm);
-      bob.material.side = THREE.DoubleSide;
       bob.position.copy(c).add(V(0, 0.02, -0.012));
       bob.scale.set(0.95, 1, 1.02);
       H.add(bob);

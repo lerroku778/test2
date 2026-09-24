@@ -5,10 +5,11 @@ import * as E from './engine.js';
 const clean = (s, n = 16) => String(s ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, n);
 
 export class Room {
-  constructor(code, send) {
+  constructor(code, send, tod) {
     this.code = code;
     this.send = send; // (pid, msg) => void
     this.st = E.newLobby();
+    if (E.TODS.includes(tod)) this.st.tod = tod;
     this.people = new Map(); // pid -> { nm }
     this.botAt = 0;
     this.botSeq = -1;
@@ -46,6 +47,9 @@ export class Room {
       }
       case 'sit': ok = E.sit(st, pid, this.people.get(pid).nm, m.seat | 0); break;
       case 'stand': ok = E.stand(st, pid); break;
+      case 'tod': // время суток меняется только до начала партии
+        if ((st.ph === 'lobby' || st.ph === 'over') && E.TODS.includes(m.v)) { st.tod = m.v; ok = true; }
+        break;
       case 'start': ok = seat >= 0 && E.startGame(st); break;
       case 'again': if (st.ph === 'over') { E.backToLobby(st); ok = true; } break;
       case 'play': ok = seat >= 0 && Array.isArray(m.a) && E.play(st, seat, m.a.slice(0, 3).map((x) => x | 0)); break;

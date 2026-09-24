@@ -71,6 +71,7 @@ const G = {
   spectate: false, lastSmoke: 0, camMode: 'orbit', fade: 1, dealing: false,
   locked: false, zoom: false, aim: null, hover: -1, pendingPlay: null,
   sens: clamp(+store.get('sens', '1') || 1, 0.25, 3),
+  menuTod: store.get('tod', 'evening'), specSpot: 0,
 };
 if (isMobile) document.body.classList.add('touch');
 
@@ -96,6 +97,8 @@ async function boot() {
   await nextFrame();
   world = buildWorld(scene);
   world.lights.sun.shadow.mapSize.set(Q.shadow, Q.shadow);
+  world.setTime(G.menuTod);
+  syncTodButtons(G.menuTod);
   setP(45, 'Рассаживаем гостей…');
   await nextFrame();
   particles = new Particles(scene);
@@ -253,7 +256,7 @@ async function goOnline(create) {
   const btn = create ? $('createBtn') : $('joinBtn');
   btn.disabled = true;
   try {
-    const m = await net.connect(myName(), { create, code });
+    const m = await net.connect(myName(), { create, code, tod: G.menuTod });
     G.pid = m.pid; G.code = m.code; G.solo = false;
     history.replaceState(null, '', `${location.pathname}?room=${m.code}`);
   } catch (e) {
@@ -264,7 +267,7 @@ async function goOnline(create) {
 function goSolo() {
   audio.init();
   G.pid = 'me'; G.code = 'СОЛО'; G.solo = true;
-  net.playLocal(myName());
+  net.playLocal(myName(), G.menuTod);
 }
 
 function leave() {
@@ -274,6 +277,8 @@ function leave() {
   G.st = null; G.mySeat = -1; G.spectate = false;
   resetVisuals(true);
   history.replaceState(null, '', location.pathname);
+  world.setTime(G.menuTod);
+  syncTodButtons(G.menuTod);
   showScreen('menu');
 }
 
@@ -289,6 +294,7 @@ function onState(st) {
   G.st = st;
   G.recvAt = Date.now();
   G.mySeat = st.seats.findIndex((s) => s.pid === G.pid);
+  if (st.tod && st.tod !== world.tod) { world.setTime(st.tod); syncTodButtons(st.tod); }
   const inGame = st.ph !== 'lobby';
   const fresh = !prev || prev.gid !== st.gid;
 
@@ -440,7 +446,8 @@ function handleEvent(prev, st) {
           audio.retch();
           stamp('ОТРАВЛЕН', s === me ? 'Ты выбываешь' : `${nmFull(s)} выбывает`, 'green', 2200);
           if (s === me) { G.poison = 1; paintSplat(); G.shake = 0.8; }
-          later(4400, () => { G.visualDead[s] = true; audio.death(); renderHud(); if (s === me) later(1800, () => { G.spectate = true; toast('Ты вне игры. Смотри, чем кончится.'); }); });
+          // сразу после смерти — вид наблюдателя сбоку, а не из осевшей на стол головы
+          later(4400, () => { G.visualDead[s] = true; audio.death(); if (s === me) { G.spectate = true; toast('Ты вне игры. ЛКМ — сменить точку обзора.', 4000); } renderHud(); });
           feed(`${say(s, 'Ты выбываешь', 'выбывает')}: яд.`);
         } else {
           ch.play('survive');
@@ -860,12 +867,15 @@ function loop() {
     const fov = G.zoom && G.screen === 'hud' ? 30 : 57;
     camera.fov = snap ? fov : camera.fov + (fov - camera.fov) * zoomK;
   } else if (G.camMode === 'spect') {
-    // зритель: облёт стола, мышь крутит и наклоняет
-    const a = time * 0.05 + G.look.yaw * 1.6;
-    const hgt = 2.05 + clamp(G.look.pitch - LOOK0.pitch, -0.6, 0.8) * 0.9;
-    camera.position.set(Math.sin(a) * 1.85, hgt, Math.cos(a) * 1.85);
-    camera.lookAt(0, TABLE_Y + 0.15, 0);
-    camera.fov = 55;
+    // наблюдатель стоит сбоку от стола (между местами) и свободно смотрит мышью;
+    // ЛКМ / Пробел — перейти на соседнюю точку
+    if (snap) { G.specSpot = 0; G.look = { ...LOOK0 }; }
+    const a = (G.mySeat >= 0 ? G.mySeat : 0) * Math.PI / 2 + Math.PI / 4 + G.specSpot * Math.PI / 2;
+    camera.position.set(Math.sin(a) * 2.0, 1.72, Math.cos(a) * 2.0);
+    const basePitch = -Math.atan2(1.72 - TABLE_Y - 0.1, 2.0);
+    tmpE.set(clamp(basePitch - (G.look.pitch - LOOK0.pitch), -1.3, 1.0), a + G.look.yaw, 0);
+    camera.quaternion.setFromEuler(tmpE);
+    camera.fov = 60;
   } else {
     const t = time;
     // меню и лобби: вид со двора на навес (катушки за спиной, дерево слева)
@@ -894,7 +904,7 @@ function loop() {
   world.flicker.forEach((f) => { f.l.intensity = f.base * (0.92 + Math.sin(time * 3 + f.ph) * 0.04 + Math.sin(time * 11.3 + f.ph * 2) * 0.03); });
 
   // постобработка
-  const expT = (G.screen === 'hud' ? 1 : 1.45) * (TOON ? 1.05 : 1.2);
+  const expT = (G.screen === 'hud' ? 1 : 1.45) * (TOON ? 1.05 : 1.2) * (world.exposure || 1);
   renderer.toneMappingExposure += (expT - renderer.toneMappingExposure) * Math.min(1, dt * 2);
   G.flash = Math.max(0, G.flash - dt * 2.2);
   G.poison = Math.max(0, G.poison - dt * 0.08);
@@ -922,6 +932,7 @@ function loop() {
     u2.led.material.emissiveIntensity = 2 + push * 3;
   }
   if (G.screen === 'hud' && Math.floor(time * 2) !== Math.floor((time - dt) * 2)) updateSmokeBtn();
+  if (G.camMode === 'spect' && G.screen === 'hud' && G.aimKey !== 'spect') { G.aimKey = 'spect'; G.aim = null; $('aim').innerHTML = `${isMobile ? '' : '<kbd>ЛКМ</kbd>'}Другая точка обзора`; $('aim').classList.remove('red'); }
   const crossOn = fpPlay && G.locked && !G.visualDead[G.mySeat];
   if (crossOn !== G.crossOn) { G.crossOn = crossOn; $('cross').classList.toggle('hidden', !crossOn); }
   composer.render(dt);
@@ -944,7 +955,8 @@ document.addEventListener('mousemove', (e) => {
 canvas.addEventListener('mousedown', (e) => {
   if (isMobile || !inHud()) return;
   if (!G.locked) { if (e.button === 0) lock(); return; }
-  if (e.button === 0) primaryAction();
+  if (e.button === 0 && G.camMode === 'spect') nextSpot();
+  else if (e.button === 0) primaryAction();
   else if (e.button === 2) G.zoom = true;
 });
 document.addEventListener('mouseup', (e) => { if (e.button === 2) G.zoom = false; });
@@ -967,13 +979,34 @@ canvas.addEventListener('pointermove', (e) => {
 });
 const endTouch = (e) => {
   if (!touch || e.pointerId !== touch.id) return;
-  if (!touch.moved && inHud() && G.camMode === 'fp') {
+  if (!touch.moved && inHud() && G.camMode === 'spect') nextSpot();
+  else if (!touch.moved && inHud() && G.camMode === 'fp') {
     primaryAction(updateAim(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)));
   }
   touch = null;
 };
 canvas.addEventListener('pointerup', endTouch);
 canvas.addEventListener('pointercancel', () => { touch = null; });
+
+function nextSpot() { G.specSpot = (G.specSpot + 1) % 4; G.look = { ...LOOK0 }; }
+
+// время суток: в меню выбирается для новой комнаты, в лобби — для текущей
+function syncTodButtons(tod) {
+  for (const id of ['todMenu', 'todLobby']) [...$(id).children].forEach((b) => b.classList.toggle('on', b.dataset.tod === tod));
+}
+$('todMenu').addEventListener('click', (e) => {
+  const tod = e.target.dataset && e.target.dataset.tod;
+  if (!tod) return;
+  G.menuTod = tod; store.set('tod', tod);
+  if (world) world.setTime(tod);
+  syncTodButtons(tod);
+});
+$('todLobby').addEventListener('click', (e) => {
+  const tod = e.target.dataset && e.target.dataset.tod;
+  if (!tod) return;
+  G.menuTod = tod; store.set('tod', tod);
+  net.send({ t: 'tod', v: tod });
+});
 
 function toggleSound() { audio.init(); audio.setMuted(!audio.muted); syncAudioBtns(); }
 function toggleMusic() { audio.init(); audio.setMusic(!audio.music); syncAudioBtns(); }
@@ -997,7 +1030,7 @@ addEventListener('keydown', (e) => {
   if (e.repeat) return;
   const c = e.code;
   if (/^(Digit|Numpad)[1-5]$/.test(c)) toggleCard(+c.slice(-1) - 1);
-  else if (c === 'Space' || c === 'Enter' || c === 'NumpadEnter') { e.preventDefault(); playSelected(); }
+  else if (c === 'Space' || c === 'Enter' || c === 'NumpadEnter') { e.preventDefault(); if (G.camMode === 'spect') nextSpot(); else playSelected(); }
   else if (c === 'KeyQ' || c === 'KeyL') callLiar();
   else if (c === 'KeyE') smoke();
   else if (c === 'KeyX' || c === 'Backspace') clearSel();
@@ -1070,5 +1103,5 @@ if (qs.get('room')) $('codeIn').value = qs.get('room').toUpperCase().slice(0, 6)
 
 window.addEventListener('error', (e) => { console.error(e.error || e.message); });
 boot().catch((e) => { console.error(e); $('loadMsg').textContent = 'Не удалось запустить 3D: ' + (e.message || e); });
-if (qs.has('debug')) Object.assign(window, { __G: G, __net: net, __chars: chars, __cam: camera, __THREE: THREE, __audio: audio, __renderer: renderer, __scene: scene, __composer: composer });
+if (qs.has('debug')) Object.assign(window, { __G: G, __net: net, __chars: chars, __cam: camera, __THREE: THREE, __audio: audio, __renderer: renderer, __scene: scene, __composer: composer, __world: () => world });
 if (qs.has('debug')) window.__advance = (sec) => { for (let t = 0; t < sec; t += 1 / 30) { stepChars(1 / 30, clock.elapsedTime + t); cards.update(1 / 30); particles.update(1 / 30, camera); } };

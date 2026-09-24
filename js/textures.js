@@ -618,17 +618,32 @@ export function barkCanvas() {
   return c;
 }
 
-export function skyCanvas() {
-  const [c, g] = canvas(64, 1024);
+// Небо под время суток: день, вечер (закат), ночь со звёздами
+const SKY = {
+  day: ['#4f86cc', '#8db8e6', '#d6e4ee', '#e6e8de', '#6c756b', '#34342f'],
+  evening: ['#0e1326', '#27305a', '#6a4f79', '#d9855e', '#f0b477', '#2a2019', '#0c0907'],
+  night: ['#02040a', '#070b1a', '#111630', '#1b1c30', '#0b0a0c', '#050404'],
+};
+export function skyCanvas(tod = 'evening') {
+  const [c, g] = canvas(tod === 'night' ? 1024 : 64, 1024);
+  const W = c.width;
+  const cols = SKY[tod] || SKY.evening;
+  const stops = tod === 'evening' ? [0, 0.3, 0.44, 0.5, 0.53, 0.6, 1] : [0, 0.32, 0.47, 0.51, 0.58, 1];
   const gr = g.createLinearGradient(0, 0, 0, 1024);
-  gr.addColorStop(0, '#0e1326');
-  gr.addColorStop(0.3, '#27305a');
-  gr.addColorStop(0.44, '#6a4f79');
-  gr.addColorStop(0.5, '#d9855e');
-  gr.addColorStop(0.53, '#f0b477');
-  gr.addColorStop(0.6, '#2a2019');
-  gr.addColorStop(1, '#0c0907');
-  g.fillStyle = gr; g.fillRect(0, 0, 64, 1024);
+  cols.forEach((col, i) => gr.addColorStop(stops[i], col));
+  g.fillStyle = gr; g.fillRect(0, 0, W, 1024);
+  if (tod === 'night') {
+    const r = rng(17);
+    for (let i = 0; i < 900; i++) {
+      const y = Math.pow(r(), 1.6) * 470, a = 0.25 + r() * 0.75;
+      g.fillStyle = `rgba(235,238,255,${a * (1 - y / 520)})`;
+      g.fillRect(r() * W, y, r() < 0.08 ? 2 : 1, r() < 0.08 ? 2 : 1);
+    }
+    // луна
+    const mg = g.createRadialGradient(700, 250, 2, 700, 250, 40);
+    mg.addColorStop(0, 'rgba(250,248,235,1)'); mg.addColorStop(0.35, 'rgba(240,238,225,0.95)'); mg.addColorStop(0.45, 'rgba(200,210,255,0.25)'); mg.addColorStop(1, 'rgba(160,180,255,0)');
+    g.fillStyle = mg; g.fillRect(640, 190, 120, 120);
+  }
   return c;
 }
 
