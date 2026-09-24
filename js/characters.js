@@ -393,20 +393,29 @@ export class Character {
       sph(0.012, M.satin, 0, 0.37, 0.12, Tq, 1.8, 0.8, 0.6);
       // сборка на талии
       for (let k = 0; k < 5; k++) { const t = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.006, 6, 30), M.top); t.rotation.x = Math.PI / 2; t.scale.set(1, 0.75, 1); t.position.y = 0.14 + k * 0.025; Tq.add(t); }
-      // юбка-ярусы
-      for (let k = 0; k < 3; k++) {
-        const sk = new THREE.Mesh(new THREE.CylinderGeometry(0.17 + k * 0.05, 0.25 + k * 0.06, 0.13, 32, 1, true), M.top);
-        sk.material.side = THREE.DoubleSide;
-        sk.position.set(0, HIPS_Y + 0.08 - k * 0.07, 0.12 + k * 0.05);
-        sk.rotation.x = 0.55;
-        sk.scale.set(1, 1, 1.3);
-        B.add(sk);
-        const lace = new THREE.Mesh(new THREE.TorusGeometry(0.25 + k * 0.06, 0.012, 6, 40), M.lace);
-        lace.position.set(0, HIPS_Y + 0.08 - k * 0.07 - 0.055, 0.12 + k * 0.05 + 0.035);
-        lace.rotation.x = Math.PI / 2 + 0.55;
-        lace.scale.set(1, 1.3, 1);
-        B.add(lace);
-      }
+      // юбка для сидящей фигуры: лежит на бёдрах (не уходит под сиденье и сквозь стул)
+      // и спереди свисает с колен волнами, по краю — кружево
+      const lapG = new THREE.SphereGeometry(0.2, 32, 18, 0, Math.PI * 2, 0, Math.PI * 0.62);
+      const lap = new THREE.Mesh(lapG, M.top);
+      lap.position.set(0, HIPS_Y + 0.05, 0.2);
+      lap.scale.set(1.3, 0.62, 1.38);
+      B.add(lap);
+      // оборка, свисающая с колен вперёд и вниз (только передняя половина круга)
+      const frillG = new THREE.CylinderGeometry(0.2, 0.27, 0.2, 40, 1, true, -Math.PI * 0.5, Math.PI);
+      const pa = frillG.attributes.position;
+      for (let v = 0; v < pa.count; v++) { const x = pa.getX(v), z = pa.getZ(v), y = pa.getY(v); const a = Math.atan2(x, z); const w = 1 + Math.sin(a * 9) * 0.035 * (0.5 - y / 0.2); pa.setXYZ(v, x * w, y, z * w); }
+      frillG.computeVertexNormals();
+      const frillM = M.top.clone();
+      frillM.side = THREE.DoubleSide;
+      const frill = new THREE.Mesh(frillG, frillM);
+      frill.position.set(0, HIPS_Y - 0.06, 0.36);
+      frill.scale.set(1.25, 1, 0.55);
+      B.add(frill);
+      const hem = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.011, 6, 40, Math.PI), M.lace);
+      hem.rotation.set(Math.PI / 2, 0, 0);
+      hem.position.set(0, HIPS_Y - 0.16, 0.36);
+      hem.scale.set(1.25, 0.55, 1);
+      B.add(hem);
     }
     if (key === 'priest') {
       // подрясник: драпировка от колен до пола
