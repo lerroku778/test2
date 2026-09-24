@@ -854,7 +854,7 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
   const cY = 2.95; // низ балок потолка
   const brickM = mat({ map: T.toTex(T.blockWallCanvas(8), { repeat: [0.35, 1.2] }), color: '#e6d39c', roughness: 0.95 });
   for (const [x, z, y0, w] of [[fx, zA, PH, 0.5], [fx, zB, PH, 0.42], [bxw, zA, 1.05, 0.42], [bxw, zB, 1.05, 0.42]]) {
-    const col = box(w, cY - y0 + 0.1, w, brickM, x, (cY + 0.1 + y0) / 2, z);
+    const col = box(w, cY + 0.3 - y0, w, brickM, x, (cY + 0.3 + y0) / 2, z); // до самого потолка
     shadow(col);
     scene.add(col);
   }
@@ -877,7 +877,10 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
     shadow(bm);
     scene.add(bm);
   }
-  scene.add(box(fx - bxw + 0.3, 0.03, zA - zB + 0.5, woodDark, (fx + bxw) / 2, cY + 0.3, bzc)); // дощатый потолок
+  scene.add(box(fx - bxw + 0.9, 0.03, zA - zB + 0.9, woodDark, (fx + bxw) / 2, cY + 0.315, bzc)); // дощатый потолок до свесов
+  // обвязка поверх колонн: на неё опираются потолок и крыша
+  for (const x of [fx, bxw]) { const pl = box(0.5, 0.22, zA - zB + 0.5, beam, x, cY + 0.19, bzc); shadow(pl); scene.add(pl); }
+  for (const z of [zA, zB]) { const pl = box(fx - bxw + 0.5, 0.22, 0.42, beam, (fx + bxw) / 2, cY + 0.19, z); shadow(pl); scene.add(pl); }
   // двускатная крыша (конёк вдоль стенки), черепица
   const shingleM = mat({ map: T.toTex(shingleCanvas(), { repeat: [3, 1] }), roughness: 0.9, side: THREE.DoubleSide });
   const eaveF = fx + 0.45, eaveB = bxw - 0.45, ridgeX = (eaveF + eaveB) / 2, rY0 = cY + 0.3, rY1 = rY0 + 0.6;
@@ -888,6 +891,8 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
     shadow(pl);
     scene.add(pl);
   }
+  // подшивка свесов спереди и сзади: между потолком и черепицей нет щели
+  for (const x of [eaveF, eaveB]) scene.add(box(0.04, 0.12, zA - zB + 0.9, woodDark, x, rY0 + 0.03, bzc));
   // фронтоны из досок
   const gs = new THREE.Shape();
   gs.moveTo(-half2, 0); gs.lineTo(half2, 0); gs.lineTo(0, rY1 - rY0); gs.closePath();
