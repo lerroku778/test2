@@ -162,6 +162,12 @@ export function buildWorld(scene) {
     lf.position.set(-0.05 + (r() - 0.5) * 0.25, 1.12 + r() * 0.3, -1.6 + r() * 0.6);
     counter.add(lf);
   }
+  // колонка на стойке — из неё играет музыка бара
+  W.speaker = buildSpeaker();
+  W.speaker.position.set(E - 0.24, 1.07, 0.15);
+  W.speaker.rotation.y = -Math.PI / 2 - 0.25;
+  gz.add(W.speaker);
+
   // низкая стенка спереди (-Z) из сланцевой плитки со скамьёй
   const low = new THREE.Group();
   gz.add(low);
@@ -296,6 +302,43 @@ export function buildWorld(scene) {
   shadow(W.table, true, true);
   W.chairs.forEach((c) => shadow(c, true, true));
   return W;
+}
+
+function buildSpeaker() {
+  const g = new THREE.Group();
+  const cab = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.36, 0.22, 3, 0.02), mat({ color: '#18181a', roughness: 0.7 }));
+  cab.position.y = 0.18;
+  g.add(cab);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.21, 0.33), mat({ color: '#0e0e10', roughness: 0.9 }));
+  face.position.set(0, 0.18, 0.111);
+  g.add(face);
+  const ringM = mat({ color: '#3a3a3e', roughness: 0.4, metalness: 0.6 });
+  const woofRing = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.008, 8, 32), ringM);
+  woofRing.position.set(0, 0.13, 0.113);
+  g.add(woofRing);
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(0.072, 0.035, 32, 1, true), mat({ color: '#2b2b2f', roughness: 0.85, side: THREE.DoubleSide }));
+  cone.rotation.x = -Math.PI / 2;
+  cone.position.set(0, 0.13, 0.1);
+  g.add(cone);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.024, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat({ color: '#1c1c1f', roughness: 0.5 }));
+  cap.rotation.x = Math.PI / 2;
+  cap.position.set(0, 0.13, 0.103);
+  g.add(cap);
+  const tw = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.01, 20), ringM);
+  tw.rotation.x = Math.PI / 2;
+  tw.position.set(0, 0.28, 0.113);
+  g.add(tw);
+  const led = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), new THREE.MeshStandardMaterial({ color: '#60ff7a', emissive: '#40ff60', emissiveIntensity: 4 }));
+  led.position.set(0.085, 0.03, 0.113);
+  g.add(led);
+  for (const x of [-0.09, 0.09]) {
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.01, 10), ringM);
+    foot.position.set(x, 0.005, 0);
+    g.add(foot);
+  }
+  g.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+  g.userData = { cone, cap, led };
+  return g;
 }
 
 function buildTable(R, m) {

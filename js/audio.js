@@ -34,10 +34,104 @@ export class Audio {
     for (let i = 0; i < bd.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; bd[i] = last * 3.5; }
     this.startAmbience();
     this.startMusic();
+    this.loadTrack('assets/bar-track.mp3');
   }
 
   setMuted(m) { this.muted = m; if (this.master) this.master.gain.value = m ? 0 : 0.8; }
-  setMusic(on) { this.music = on; if (this.mus) this.mus.gain.value = on ? 0.22 : 0; }
+  setMusic(on) { this.music = on; this.applyMusic(); }
+
+  // ---------- трек из колонки в баре ----------
+  async loadTrack(url) {
+    if (this.trackLoading) return;
+    this.trackLoading = true;
+    try {
+      const r = await fetch(url);
+      this.trackBuf = await this.ctx.decodeAudioData(await r.arrayBuffer());
+      this.applyMusic();
+    } catch (e) { console.warn('Музыка бара не загрузилась', e); }
+  }
+
+  // В игре — колонка, в меню — тихая гитара.
+  setInGame(v) { if (this.inGame !== v) { this.inGame = v; this.applyMusic(); } }
+
+  applyMusic() {
+    const c = this.ctx; if (!c) return;
+    const t = c.currentTime;
+    this.mus.gain.cancelScheduledValues(t);
+    this.mus.gain.setTargetAtTime(this.music && !this.inGame ? 0.22 : 0, t, 0.6);
+    if (this.inGame && this.music && this.trackBuf) this.speakerOn();
+    else this.speakerOff();
+  }
+
+  speakerOn() {
+    const c = this.ctx;
+    if (this.spk) return;
+    if (!this.spkChain) {
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 120;
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 6000;
+      const mid = c.createBiquadFilter(); mid.type = 'peaking'; mid.frequency.value = 1700; mid.gain.value = 4; mid.Q.value = 0.8;
+      const sh = c.createWaveShaper();
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; curve[i] = Math.tanh(x * 1.6) / Math.tanh(1.6); }
+      sh.curve = curve;
+      const panner = c.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 1.3;
+      panner.rolloffFactor = 1.2;
+      panner.maxDistance = 40;
+      panner.coneInnerAngle = 140; panner.coneOuterAngle = 280; panner.coneOuterGain = 0.5;
+      const out = c.createGain(); out.gain.value = 0;
+      const send = c.createGain(); send.gain.value = 0.35;
+      const an = c.createAnalyser(); an.fftSize = 256;
+      hp.connect(mid); mid.connect(sh); sh.connect(lp); lp.connect(an); lp.connect(panner); panner.connect(out); out.connect(this.master);
+      lp.connect(send); send.connect(this.verb);
+      this.spkChain = { input: hp, panner, out, an, data: new Uint8Array(an.frequencyBinCount) };
+      if (this.spkPos) this.setSpeaker(this.spkPos.p, this.spkPos.d);
+    }
+    const src = c.createBufferSource();
+    src.buffer = this.trackBuf; src.loop = true;
+    src.connect(this.spkChain.input);
+    const off = (this.spkOffset || 0) % this.trackBuf.duration;
+    src.start(0, off);
+    this.spk = { src, startedAt: c.currentTime - off };
+    this.spkChain.out.gain.setTargetAtTime(0.9, c.currentTime, 0.8);
+  }
+
+  speakerOff() {
+    if (!this.spk) return;
+    const c = this.ctx, s = this.spk;
+    this.spkOffset = c.currentTime - s.startedAt;
+    this.spkChain.out.gain.setTargetAtTime(0, c.currentTime, 0.3);
+    try { s.src.stop(c.currentTime + 1.2); } catch { /* уже остановлен */ }
+    this.spk = null;
+  }
+
+  setSpeaker(p, d) {
+    this.spkPos = { p, d };
+    if (!this.spkChain) return;
+    const pn = this.spkChain.panner;
+    if (pn.positionX) { pn.positionX.value = p.x; pn.positionY.value = p.y; pn.positionZ.value = p.z; pn.orientationX.value = d.x; pn.orientationY.value = d.y; pn.orientationZ.value = d.z; }
+    else { pn.setPosition(p.x, p.y, p.z); pn.setOrientation(d.x, d.y, d.z); }
+  }
+
+  setListener(p, f, u) {
+    const l = this.ctx && this.ctx.listener; if (!l) return;
+    if (l.positionX) {
+      l.positionX.value = p.x; l.positionY.value = p.y; l.positionZ.value = p.z;
+      l.forwardX.value = f.x; l.forwardY.value = f.y; l.forwardZ.value = f.z;
+      l.upX.value = u.x; l.upY.value = u.y; l.upZ.value = u.z;
+    } else { l.setPosition(p.x, p.y, p.z); l.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z); }
+  }
+
+  // громкость низов для качания динамика
+  speakerLevel() {
+    if (!this.spk || !this.spkChain) return 0;
+    const { an, data } = this.spkChain;
+    an.getByteFrequencyData(data);
+    let s = 0; for (let i = 1; i < 8; i++) s += data[i];
+    return s / (7 * 255);
+  }
 
   noise(dur, { type = 'bandpass', f = 1000, q = 1, f2, gain = 0.5, attack = 0.005, dest, brown = false, when = 0 } = {}) {
     const c = this.ctx; if (!c) return;

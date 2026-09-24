@@ -780,6 +780,22 @@ function loop() {
   grade.uniforms.fade.value = G.fade;
 
   updatePlates();
+  // музыка бара из колонки: слушатель — камера
+  if (audio.ctx) {
+    audio.setInGame(G.screen === 'hud');
+    const f = V(0, 0, -1).applyQuaternion(camera.quaternion), u = V(0, 1, 0).applyQuaternion(camera.quaternion);
+    audio.setListener(camera.position, f, u);
+    if (!G.spkSet) {
+      G.spkSet = true;
+      world.speaker.updateMatrixWorld(true);
+      audio.setSpeaker(world.speaker.localToWorld(V(0, 0.18, 0.12)), V(0, 0, 1).applyQuaternion(world.speaker.getWorldQuaternion(new THREE.Quaternion())));
+    }
+    const lvl = audio.speakerLevel();
+    const u2 = world.speaker.userData;
+    const push = 1 + lvl * 0.9;
+    u2.cone.position.z = 0.1 + lvl * 0.012; u2.cap.position.z = 0.103 + lvl * 0.014;
+    u2.led.material.emissiveIntensity = 2 + push * 3;
+  }
   if (G.screen === 'hud' && Math.floor(time * 2) !== Math.floor((time - dt) * 2)) updateSmokeBtn();
   composer.render(dt);
 }
@@ -862,5 +878,5 @@ if (qs.get('room')) $('codeIn').value = qs.get('room').toUpperCase().slice(0, 6)
 
 window.addEventListener('error', (e) => { console.error(e.error || e.message); });
 boot().catch((e) => { console.error(e); $('loadMsg').textContent = 'Не удалось запустить 3D: ' + (e.message || e); });
-if (qs.has('debug')) Object.assign(window, { __G: G, __net: net, __chars: chars, __cam: camera, __THREE: THREE });
+if (qs.has('debug')) Object.assign(window, { __G: G, __net: net, __chars: chars, __cam: camera, __THREE: THREE, __audio: audio });
 if (qs.has('debug')) window.__advance = (sec) => { for (let t = 0; t < sec; t += 1 / 30) { stepChars(1 / 30, clock.elapsedTime + t); cards.update(1 / 30); particles.update(1 / 30, camera); } };
