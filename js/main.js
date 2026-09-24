@@ -378,8 +378,23 @@ function onState(st) {
       if (i === G.mySeat) { audio.lighter(); later(900, () => audio.inhale()); }
     }
   });
+  // смерть, которую не успела отметить анимация, — по состоянию сервера (кроме самой фазы «пьёт»,
+  // где отравление ещё проигрывается)
+  if (inGame && st.ph !== 'drink') st.seats.forEach((s, i) => { if (!s.alive && !G.visualDead[i]) markDead(i); });
   G.spectate = G.mySeat < 0 || (G.visualDead[G.mySeat] && inGame);
   renderHud();
+}
+
+// Выбывший игрок: дальше он только наблюдает. Вызывается по таймеру в конце анимации отравления,
+// а если таймер не успел (фаза «пьёт» короче анимации, и новая раздача сбрасывает таймеры) —
+// по состоянию сервера, иначе своя камера так и оставалась в осевшей под стол голове.
+function markDead(i) {
+  if (G.visualDead[i]) return;
+  G.visualDead[i] = true;
+  const ch = chars[i];
+  if (!ch.dead && !(ch.action && ch.action.name === 'poison')) ch.setDead(true, true);
+  audio.death();
+  if (i === G.mySeat) { G.spectate = true; toast(`Ты вне игры. ${isMobile ? 'Тап' : 'ЛКМ'} — сменить точку обзора.`, 4000); }
 }
 
 function resetVisuals(clearMess) {
@@ -510,7 +525,7 @@ function handleEvent(prev, st) {
           stamp('ОТРАВЛЕН', s === me ? 'Ты выбываешь' : `${nmFull(s)} выбывает`, 'green', 2200);
           if (s === me) { G.poison = 1; paintSplat(); G.shake = 0.8; }
           // сразу после смерти — вид наблюдателя сбоку, а не из осевшей на стол головы
-          later(4400, () => { G.visualDead[s] = true; audio.death(); if (s === me) { G.spectate = true; toast('Ты вне игры. ЛКМ — сменить точку обзора.', 4000); } renderHud(); });
+          later(4400, () => { markDead(s); renderHud(); });
           feed(`${say(s, 'Ты выбываешь', 'выбывает')}: яд.`);
         } else {
           ch.play('survive');
@@ -1197,6 +1212,16 @@ function toggleFs() {
 }
 // на iPhone полноэкранного режима для страниц нет — кнопки не показываем
 if (!document.fullscreenEnabled) for (const id of ['fsBtn', 'pFs']) $(id).classList.add('hidden');
+// Телефон: во весь экран сразу, с первого касания (браузер разрешает это только по жесту пользователя),
+// ещё в главном меню. Если из полноэкранного вышли (жест «назад»), следующее касание вернёт его.
+// Касание поля ввода не считается: там открывается клавиатура.
+if (isMobile && document.fullscreenEnabled) {
+  addEventListener('pointerup', (e) => {
+    if (document.fullscreenElement || e.target.closest?.('input, textarea')) return;
+    if (e.target.closest?.('#fsBtn, #pFs')) return; // эти кнопки сами переключают режим
+    toggleFs();
+  }, true);
+}
 if (isMobile) $('sensLabel').textContent = 'Чувствительность';
 function syncAudioBtns() {
   $('sndBtn').classList.toggle('off', audio.muted);

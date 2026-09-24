@@ -1,4 +1,7 @@
 // Весь звук синтезируется: без файлов.
+// громкость дождя: раньше было 0.5 — шум забивал музыку и всё остальное; теперь еле слышный фон (−26 дБ)
+const RAIN_VOL = 0.025;
+
 export class Audio {
   constructor() {
     this.ctx = null;
@@ -38,7 +41,7 @@ export class Audio {
     this.applyRain();
   }
 
-  // шум дождя: белый шум через полосу 700–5200 Гц плюс глухой гул капель по крыше
+  // шум дождя: белый шум через полосу 700–3800 Гц плюс глухой гул капель по крыше
   setRain(on) { this.rain = on; this.applyRain(); }
   applyRain() {
     const c = this.ctx;
@@ -47,12 +50,12 @@ export class Audio {
       const g = c.createGain(); g.gain.value = 0; g.connect(this.amb);
       const src = c.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
       const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 700;
-      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200;
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3800;
       src.connect(hp); hp.connect(lp); lp.connect(g);
       const roof = c.createBufferSource(); roof.buffer = this.brownBuf; roof.loop = true;
       const rg = c.createGain(); rg.gain.value = 0.35; roof.connect(rg); rg.connect(g);
       src.start(); roof.start();
-      g.gain.linearRampToValueAtTime(0.5, c.currentTime + 2);
+      g.gain.linearRampToValueAtTime(RAIN_VOL, c.currentTime + 2); // фон, а не стена шума
       this.rainNode = { g, src, roof };
     } else if (!this.rain && this.rainNode) {
       const { g, src, roof } = this.rainNode;
