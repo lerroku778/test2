@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as T from './textures.js';
 import { mat, seatPos, seatYaw } from './world.js';
+import { rigidSkin, referenced } from './merge.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 const UP = V(0, 1, 0), DOWN = V(0, -1, 0);
@@ -195,11 +196,16 @@ export class Character {
     this.dead = false;
     this.cards = 0;
     this.lookAt = null;
+    this.fp = null; // вид от первого лица: { yaw, pitch } напрямую от мыши
     this.smoking = null;
     this.baseMouth = 0;
     this.baseBrow = 0;
     this.build();
     this.root.traverse((c) => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    // неподвижные друг относительно друга детали сливаем; анимируемые (лицо, пальцы) не трогаем
+    rigidSkin(this.root, { skip: referenced(this, ['headOnly', 'skinMats', 'M', 'fx']), keep: ['headOnly'] });
+    this.headOnly = [];
+    this.root.traverse((c) => { if (c.isMesh && c.userData.headOnly) this.headOnly.push(c); });
   }
 
   skin(extra = {}) {
@@ -625,8 +631,9 @@ export class Character {
     // по умолчанию
     s.leanT = 0; s.pitchT = 0.08; s.rollT = 0; s.mouthT = this.baseMouth; s.browT = this.baseBrow; s.eyeT = this.lid || 1;
     const holding = this.cards > 0 && !this.dead;
-    const restL = holding ? V(-0.075, 0.93, 0.33) : V(-0.19, 0.812, 0.36);
-    const restR = holding ? V(0.08, 0.93, 0.33) : V(0.2, 0.812, 0.35);
+    // свои карты держим выше и дальше от груди — их видно внизу экрана
+    const restL = holding ? (this.isMe ? V(-0.095, 0.885, 0.4) : V(-0.075, 0.93, 0.33)) : V(-0.19, 0.812, 0.36);
+    const restR = holding ? (this.isMe ? V(0.1, 0.885, 0.4) : V(0.08, 0.93, 0.33)) : V(0.2, 0.812, 0.35);
     this.handT.L.copy(restL); this.handT.R.copy(restR);
     const P = (side, pose, palm) => { this.arm[side].poseT = pose; this.arm[side].palmL = palm; };
     P('L', holding ? 'hold' : 'rest', holding ? V(0.75, 0.2, -0.6) : V(0.2, -1, 0.05));
@@ -634,7 +641,8 @@ export class Character {
 
     // взгляд
     let yawT = 0, pitchLook = 0.08;
-    if (this.lookAt) {
+    if (this.fp) { yawT = this.fp.yaw; pitchLook = this.fp.pitch; }
+    else if (this.lookAt) {
       const eye = this.eyeWorld();
       const d = this.lookAt.clone().sub(eye);
       const inv = this.root.quaternion.clone().invert();
@@ -769,8 +777,17 @@ export class Character {
 
     // сглаживание
     s.lean = lerp(s.lean, s.leanT, k);
-    s.yaw = lerp(s.yaw, s.yawT, k);
-    s.pitch = lerp(s.pitch, s.pitchT, k);
+    if (this.fp) {
+      // мышь — без задержки; плавно только то, что добавляет анимация (глоток, судороги)
+      s.fpY = lerp(s.fpY || 0, s.yawT - this.fp.yaw, k);
+      s.fpP = lerp(s.fpP || 0, s.pitchT - this.fp.pitch, k);
+      s.yaw = this.fp.yaw + s.fpY;
+      s.pitch = this.fp.pitch + s.fpP;
+    } else {
+      s.fpY = s.fpP = 0;
+      s.yaw = lerp(s.yaw, s.yawT, k);
+      s.pitch = lerp(s.pitch, s.pitchT, k);
+    }
     s.roll = lerp(s.roll, s.rollT, k);
     s.mouth = lerp(s.mouth, s.mouthT, kf);
     s.brow = lerp(s.brow, s.browT, k);
@@ -779,9 +796,9 @@ export class Character {
 
     // дыхание и покачивание
     s.breath += dt * (this.dead ? 0 : 1.6);
-    const br = Math.sin(s.breath);
+    const br = Math.sin(s.breath) * (this.isMe ? 0 : 1); // свой прицел не качается
     this.torso.rotation.x = s.lean + br * 0.012;
-    this.torso.rotation.z = Math.sin(time * 0.4 + this.seat) * 0.015 * (this.dead ? 0 : 1);
+    this.torso.rotation.z = Math.sin(time * 0.4 + this.seat) * 0.015 * (this.dead || this.isMe ? 0 : 1);
     this.torso.scale.y = 1 + br * 0.008;
     this.head.rotation.set(s.pitch, s.yaw, s.roll, 'YXZ');
 
@@ -823,7 +840,15 @@ export class Character {
     if (this.fanGroup) {
       const pl = this.arm.L.hand.localToWorld(V(0, -0.05, 0.025));
       const pr = this.arm.R.hand.localToWorld(V(0, -0.05, 0.025));
-      const mid = pl.add(pr).multiplyScalar(0.5);
+      // одна рука занята (сигарета, бутылка, бросок) — веер остаётся в другой
+      const an = a && a.name;
+      const busyL = !!this.smoking;
+      const busyR = an === 'drink' || an === 'throw' || an === 'point';
+      // свой веер — чуть выше и дальше кистей: руки держат его снизу и не закрывают карты
+      const mid = this.isMe ? this.root.localToWorld(V(0, 0.95, 0.43))
+        : busyL && !busyR ? pr.add(V(-0.085, 0, 0).applyQuaternion(this.root.quaternion))
+          : busyR && !busyL ? pl.add(V(0.085, 0, 0).applyQuaternion(this.root.quaternion))
+            : pl.add(pr).multiplyScalar(0.5);
       this.torso.updateMatrixWorld(true);
       const loc = this.torso.worldToLocal(mid);
       loc.y -= 0.012;

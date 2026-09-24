@@ -26,6 +26,10 @@ export class Cards {
     this.edge = mat({ color: '#e8dcc2', roughness: 0.8 });
     this.face = face;
     this.geo = new THREE.BoxGeometry(CARD.w, CARD.t, CARD.h);
+    // подсветка карт в руке: рамка за картой (выбрана — янтарная, под прицелом — светлая)
+    this.glowGeo = new THREE.PlaneGeometry(CARD.w + 0.009, CARD.h + 0.009);
+    this.glowSel = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 1.55, 0.42), fog: false });
+    this.glowHov = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 0.88, 0.74), fog: false });
     this.pile = [];
     this.flights = [];
     this.fans = [];
@@ -75,9 +79,15 @@ export class Cards {
     ch.fanGroup = g;
   }
 
+  clearFan(f) {
+    while (f.cards.length) f.g.remove(f.cards.pop().pivot);
+    if (f.mine) { f.mine = false; f.handKey = ''; f.g.rotation.set(-0.45, 0, 0); }
+  }
+
   setFan(seat, n) {
     const f = this.fans[seat];
     if (!f) return;
+    if (f.mine) this.clearFan(f);
     f.ch.cards = n;
     while (f.cards.length > n) f.g.remove(f.cards.pop().pivot);
     while (f.cards.length < n) {
@@ -92,6 +102,77 @@ export class Cards {
     f.cards.forEach((o, i) => {
       o.pivot.rotation.z = (i - (n - 1) / 2) * -0.2;
       o.pivot.position.set((i - (n - 1) / 2) * 0.006, 0, i * -0.0025);
+    });
+  }
+
+  // Своя рука: настоящие карты лицом к себе, их выбирают взглядом
+  setHand(seat, ranks) {
+    const f = this.fans[seat];
+    if (!f) return;
+    f.ch.cards = ranks.length;
+    const key = ranks.join('');
+    if (f.mine && f.handKey === key) return;
+    this.clearFan(f);
+    f.mine = true;
+    f.handKey = key;
+    const m = (ranks.length - 1) / 2;
+    ranks.forEach((r, i) => {
+      const pivot = new THREE.Object3D();
+      const c = this.make(r);
+      c.rotation.x = Math.PI / 2;
+      c.position.y = 0.05;
+      c.userData.handIdx = i;
+      const glow = new THREE.Mesh(this.glowGeo, this.glowSel);
+      glow.rotation.y = Math.PI;
+      glow.position.set(0, 0.05, 0.0016);
+      glow.visible = false;
+      pivot.add(c, glow);
+      pivot.position.set((i - m) * 0.042, -Math.abs(i - m) * 0.004, -i * 0.0018);
+      pivot.rotation.z = (i - m) * -0.11;
+      f.g.add(pivot);
+      f.cards.push({ pivot, c, glow, hov: 0, sel: 0 });
+    });
+  }
+
+  handMeshes(seat) {
+    const f = this.fans[seat];
+    return f && f.mine ? f.cards.map((o) => o.c) : [];
+  }
+
+  // Раскладка своей руки: веер смотрит в глаза, карта под прицелом подрастает,
+  // выбранные приподняты и светятся.
+  updateHand(seat, dt, eye, hover, sel) {
+    const f = this.fans[seat];
+    if (!f || !f.mine) return;
+    const gp = f.g.getWorldPosition(this._v1 || (this._v1 = V()));
+    f.g.lookAt(this._v2 = (this._v2 || V()).copy(gp).multiplyScalar(2).sub(eye));
+    const n = f.cards.length, m = (n - 1) / 2;
+    const k = 1 - Math.pow(0.00002, dt);
+    f.cards.forEach((o, i) => {
+      o.hov += ((i === hover ? 1 : 0) - o.hov) * k;
+      o.sel += ((sel.has(i) ? 1 : 0) - o.sel) * k;
+      const d = i - m;
+      o.pivot.position.set(d * 0.042, -Math.abs(d) * 0.004 + o.sel * 0.034 + o.hov * 0.012, -i * 0.0018 - o.hov * 0.03 - o.sel * 0.006);
+      o.pivot.rotation.z = d * -0.11 * (1 - o.hov * 0.5);
+      o.pivot.scale.setScalar(1 + o.hov * 0.16);
+      o.glow.visible = o.sel > 0.5 || o.hov > 0.5;
+      o.glow.material = o.sel > 0.5 ? this.glowSel : this.glowHov;
+    });
+    f.g.updateMatrixWorld(true);
+  }
+
+  // выбранные карты вылетают прямо из руки в кучу
+  throwFromHand(seat, idxs, pileStart, onEach) {
+    const f = this.fans[seat];
+    idxs.forEach((idx, k) => {
+      const o = f && f.mine ? f.cards[idx] : null;
+      if (!o) return;
+      const c = o.c;
+      this.scene.attach(c);
+      c.scale.setScalar(1);
+      o.glow.visible = false;
+      const p = this.pilePose(pileStart + k);
+      this.fly(c, p.pos, p.quat, 0.55, k * 0.08, () => { this.scene.remove(c); onEach && onEach(k); }, 0.14);
     });
   }
 
@@ -174,19 +255,57 @@ export class Cards {
 export class Particles {
   constructor(scene) {
     this.scene = scene;
-    // дым
+    // дым: все клубы — один меш с инстансами (раньше 260 отдельных спрайтов и столько же вызовов отрисовки)
     this.smokeTex = T.toTex(T.smokeCanvas());
     this.smokeTex.wrapS = this.smokeTex.wrapT = THREE.ClampToEdgeWrapping;
+    this.SN = 260;
     this.smokes = [];
-    this.smokeGroup = new THREE.Group();
+    for (let i = 0; i < this.SN; i++) this.smokes.push({ alive: false, pos: V(), age: 0, life: 1, vel: V(), size: 0.05, op: 0.3, rot: 0, ang: 0, scale: 0.05, opacity: 0 });
+    const sg = new THREE.InstancedBufferGeometry();
+    const pl = new THREE.PlaneGeometry(1, 1);
+    sg.index = pl.index;
+    sg.setAttribute('position', pl.attributes.position);
+    sg.setAttribute('uv', pl.attributes.uv);
+    this.sPos = new THREE.InstancedBufferAttribute(new Float32Array(this.SN * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.sDat = new THREE.InstancedBufferAttribute(new Float32Array(this.SN * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    sg.setAttribute('iPos', this.sPos);
+    sg.setAttribute('iDat', this.sDat);
+    sg.instanceCount = 0;
+    const sm = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: null }, color: { value: new THREE.Color('#c9c4bd') } }]),
+      vertexShader: /* glsl */`
+        attribute vec3 iPos; attribute vec3 iDat; // размер, прозрачность, поворот
+        varying vec2 vUv; varying float vOp;
+        #include <common>
+        #include <fog_pars_vertex>
+        void main() {
+          vUv = uv; vOp = iDat.y;
+          vec4 mvPosition = modelViewMatrix * vec4(iPos, 1.0);
+          vec2 p = position.xy * iDat.x;
+          float c = cos(iDat.z), s = sin(iDat.z);
+          mvPosition.xy += vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: /* glsl */`
+        uniform sampler2D map; uniform vec3 color;
+        varying vec2 vUv; varying float vOp;
+        #include <common>
+        #include <fog_pars_fragment>
+        void main() {
+          vec4 t = texture2D(map, vUv);
+          gl_FragColor = vec4(color * t.rgb, t.a * vOp);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }`,
+      transparent: true, depthWrite: false, fog: true,
+    });
+    sm.uniforms.map.value = this.smokeTex;
+    this.smokeGroup = new THREE.Mesh(sg, sm);
+    this.smokeGroup.frustumCulled = false;
+    this.smokeGroup.visible = false;
     scene.add(this.smokeGroup);
-    for (let i = 0; i < 260; i++) {
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTex, color: '#c9c4bd', transparent: true, depthWrite: false, opacity: 0 }));
-      s.visible = false;
-      s.userData = { age: 0, life: 1, vel: V(), size: 0.05, op: 0.3, rot: 0 };
-      this.smokeGroup.add(s);
-      this.smokes.push(s);
-    }
     this.si = 0;
     // рвота
     this.N = 900;
@@ -205,6 +324,7 @@ export class Particles {
     this.v.castShadow = true;
     scene.add(this.v);
     this.vi = 0;
+    this.vDirty = true;
     this.m4 = new THREE.Matrix4();
     this.q = new THREE.Quaternion();
     this.puddles = [];
@@ -214,12 +334,14 @@ export class Particles {
   }
 
   smoke(pos, vel, size = 0.04, life = 3, op = 0.28) {
-    const s = this.smokes[this.si++ % this.smokes.length];
-    s.visible = true;
-    s.position.copy(pos);
-    Object.assign(s.userData, { age: 0, life: life * (0.8 + Math.random() * 0.4), vel: vel.clone(), size, op, rot: (Math.random() - 0.5) * 0.8 });
-    s.material.rotation = Math.random() * 6.28;
-    s.scale.setScalar(size);
+    const s = this.smokes[this.si++ % this.SN];
+    s.alive = true;
+    s.pos.copy(pos);
+    s.vel.copy(vel);
+    s.age = 0; s.life = life * (0.8 + Math.random() * 0.4); s.size = size; s.op = op;
+    s.rot = (Math.random() - 0.5) * 0.8;
+    s.ang = Math.random() * 6.28;
+    s.scale = size; s.opacity = 0;
   }
 
   vomit(pos, dir, dt) {
@@ -232,6 +354,7 @@ export class Particles {
       o.vel.copy(dir).multiplyScalar(sp).add(V((Math.random() - 0.5) * 0.45, Math.random() * 0.4, (Math.random() - 0.5) * 0.45));
       o.s = 0.6 + Math.random() * 1.4;
     }
+    this.vDirty = true;
   }
 
   addPuddle(p, onTable) {
@@ -252,29 +375,42 @@ export class Particles {
     this.puddles.forEach((p) => this.scene.remove(p));
     this.puddles = [];
     this.vp.forEach((o) => { o.alive = false; o.stuck = false; o.p.set(0, -10, 0); });
+    this.vDirty = true;
   }
 
-  update(dt, camera) {
-    for (const s of this.smokes) {
-      if (!s.visible) continue;
-      const u = s.userData;
+  update(dt) {
+    let n = 0;
+    const P = this.sPos.array, D = this.sDat.array;
+    for (let i = 0; i < this.SN; i++) {
+      const u = this.smokes[i];
+      if (!u.alive) continue;
       u.age += dt;
-      if (u.age >= u.life) { s.visible = false; continue; }
+      if (u.age >= u.life) { u.alive = false; continue; }
       const k = u.age / u.life;
       u.vel.y += 0.03 * dt;
       u.vel.multiplyScalar(1 - dt * 0.6);
-      u.vel.x += Math.sin(u.age * 2 + s.id) * 0.01 * dt;
-      s.position.addScaledVector(u.vel, dt);
-      s.scale.setScalar(u.size + k * 0.3);
-      s.material.rotation += u.rot * dt;
-      s.material.opacity = u.op * Math.min(1, u.age * 6) * (1 - k) * (1 - k * 0.4);
+      u.vel.x += Math.sin(u.age * 2 + i) * 0.01 * dt;
+      u.pos.addScaledVector(u.vel, dt);
+      u.ang += u.rot * dt;
+      P[n * 3] = u.pos.x; P[n * 3 + 1] = u.pos.y; P[n * 3 + 2] = u.pos.z;
+      D[n * 3] = u.size + k * 0.3;
+      D[n * 3 + 1] = u.op * Math.min(1, u.age * 6) * (1 - k) * (1 - k * 0.4);
+      D[n * 3 + 2] = u.ang;
+      n++;
     }
+    this.smokeGroup.geometry.instanceCount = n;
+    this.smokeGroup.visible = n > 0;
+    if (n) { this.sPos.needsUpdate = true; this.sDat.needsUpdate = true; }
+
+    // рвота: матрицы пересчитываем, только пока что-то летит
     const g = -9.8;
-    let splat = 0;
+    let splat = 0, moving = false;
+    const sv = this._sv || (this._sv = V());
     for (let i = 0; i < this.N; i++) {
       const o = this.vp[i];
-      if (!o.alive) continue;
+      if (!o.alive || (o.stuck && !this.vDirty)) continue;
       if (!o.stuck) {
+        moving = true;
         const py = o.p.y;
         o.vel.y += g * dt;
         o.p.addScaledVector(o.vel, dt);
@@ -288,10 +424,14 @@ export class Particles {
         }
       }
       const sc = o.stuck ? o.s * 0.8 : o.s;
-      this.m4.compose(o.p, this.q, V(sc, o.stuck ? sc * 0.35 : sc, sc));
+      this.m4.compose(o.p, this.q, sv.set(sc, o.stuck ? sc * 0.35 : sc, sc));
       this.v.setMatrixAt(i, this.m4);
     }
-    this.v.instanceMatrix.needsUpdate = true;
+    if (moving || splat || this.vDirty) {
+      if (this.vDirty) for (let i = 0; i < this.N; i++) if (!this.vp[i].alive) { this.m4.makeTranslation(0, -10, 0); this.v.setMatrixAt(i, this.m4); }
+      this.v.instanceMatrix.needsUpdate = true;
+      this.vDirty = false;
+    }
     if (splat && this.onSplat) this.onSplat(splat);
     for (const p of this.puddles) {
       const t = p.userData.target;
