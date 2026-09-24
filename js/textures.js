@@ -623,12 +623,16 @@ const SKY = {
   day: ['#4f86cc', '#8db8e6', '#d6e4ee', '#e6e8de', '#6c756b', '#34342f'],
   evening: ['#0e1326', '#27305a', '#6a4f79', '#d9855e', '#f0b477', '#2a2019', '#0c0907'],
   night: ['#02040a', '#070b1a', '#111630', '#1b1c30', '#0b0a0c', '#050404'],
+  // пасмурное небо в дождь
+  'day-rain': ['#59616a', '#6e757d', '#878d93', '#8b9092', '#4c5250', '#2b2d2b'],
+  'evening-rain': ['#111319', '#20232c', '#363641', '#544848', '#62524c', '#211b17', '#0c0907'],
+  'night-rain': ['#030407', '#080a10', '#0f1118', '#13141a', '#0a0a0b', '#050404'],
 };
 export function skyCanvas(tod = 'evening') {
   const [c, g] = canvas(tod === 'night' ? 1024 : 64, 1024);
   const W = c.width;
   const cols = SKY[tod] || SKY.evening;
-  const stops = tod === 'evening' ? [0, 0.3, 0.44, 0.5, 0.53, 0.6, 1] : [0, 0.32, 0.47, 0.51, 0.58, 1];
+  const stops = cols.length === 7 ? [0, 0.3, 0.44, 0.5, 0.53, 0.6, 1] : [0, 0.32, 0.47, 0.51, 0.58, 1];
   const gr = g.createLinearGradient(0, 0, 0, 1024);
   cols.forEach((col, i) => gr.addColorStop(stops[i], col));
   g.fillStyle = gr; g.fillRect(0, 0, W, 1024);

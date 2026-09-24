@@ -56,22 +56,23 @@ wss.on('connection', (ws) => {
   sockets.set(pid, ws);
   let room = null;
   let bucket = 20; // простой лимит сообщений
-  const refill = setInterval(() => { bucket = Math.min(20, bucket + 5); }, 1000);
+  let lookBucket = 15; // повороты головы идут отдельным, более частым потоком
+  const refill = setInterval(() => { bucket = Math.min(20, bucket + 5); lookBucket = Math.min(15, lookBucket + 12); }, 1000);
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (raw) => {
-    if (--bucket < 0) return;
     let m;
     try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m !== 'object') return;
+    if (m.t === 'look' ? --lookBucket < 0 : --bucket < 0) return;
     if (m.t === 'hello') {
       if (room) return;
       let code = String(m.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
       if (m.create || !code) {
         if (rooms.size >= MAX_ROOMS) { send(pid, { t: 'err', e: 'Сервер заполнен, попробуй позже' }); return; }
         code = newCode();
-        rooms.set(code, new Room(code, send, m.tod));
+        rooms.set(code, new Room(code, send, { tod: m.tod, tbl: m.tbl, wx: m.wx }));
       }
       room = rooms.get(code);
       if (!room) { send(pid, { t: 'err', e: 'Комната ' + code + ' не найдена' }); return; }

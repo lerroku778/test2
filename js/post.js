@@ -14,9 +14,13 @@ export class StylePass extends Pass {
     this.nrt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
     this.nrt.depthTexture = new THREE.DepthTexture(1, 1);
     this.nrt.depthTexture.type = THREE.UnsignedIntType;
+    // маска дыма/дождя: рисуются поверх глубины сцены, контуры под ними гаснут
+    this.srt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+    this.srt.depthTexture = this.nrt.depthTexture;
+    this.soft = []; // полупрозрачные объекты, сквозь которые контуры не должны просвечивать
     const mode = { toon: 1, repo: 2, clean: 0 }[style] ?? 1;
     this.uniforms = {
-      tDiffuse: { value: null }, tNormal: { value: this.nrt.texture }, tDepth: { value: this.nrt.depthTexture },
+      tDiffuse: { value: null }, tNormal: { value: this.nrt.texture }, tDepth: { value: this.nrt.depthTexture }, tSmoke: { value: this.srt.texture }, useSmoke: { value: 0 },
       res: { value: new THREE.Vector2(1, 1) }, near: { value: camera.near }, far: { value: camera.far },
       time: { value: 0 }, poison: { value: 0 }, flash: { value: 0 }, fade: { value: 0 },
       mode: { value: mode }, pixel: { value: 3.0 }, ink: { value: mode === 2 ? 0.55 : mode === 1 ? 1.0 : 0.0 },
@@ -25,8 +29,8 @@ export class StylePass extends Pass {
       uniforms: this.uniforms,
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: /* glsl */`
-        uniform sampler2D tDiffuse, tNormal, tDepth;
-        uniform vec2 res; uniform float near, far, time, poison, flash, fade, pixel, ink; uniform int mode;
+        uniform sampler2D tDiffuse, tNormal, tDepth, tSmoke;
+        uniform vec2 res; uniform float near, far, time, poison, flash, fade, pixel, ink, useSmoke; uniform int mode;
         varying vec2 vUv;
         float lin(float d){ float z = d * 2.0 - 1.0; return 2.0 * near * far / (far + near - z * (far - near)); }
         float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -64,6 +68,7 @@ export class StylePass extends Pass {
             float nd = (1.0 - dot(nc, n1)) + (1.0 - dot(nc, n2)) + (1.0 - dot(nc, n3)) + (1.0 - dot(nc, n4));
             float ne = smoothstep(0.35, 0.8, nd);
             edge = max(de, ne) * ink * (1.0 - smoothstep(9.0, 26.0, dc));
+            if (useSmoke > 0.5) edge *= 1.0 - clamp(texture2D(tSmoke, uv).r * 3.0, 0.0, 1.0);
           }
 
           col = knee(col);
@@ -92,6 +97,7 @@ export class StylePass extends Pass {
 
   setSize(w, h) {
     this.nrt.setSize(w, h);
+    this.srt.setSize(w, h);
     this.uniforms.res.value.set(w, h);
   }
 
@@ -110,10 +116,22 @@ export class StylePass extends Pass {
       renderer.setClearColor(0x8080ff, 1);
       renderer.clear();
       renderer.render(this.scene, this.camera);
-      renderer.setClearColor(this._cc, ca);
-      renderer.shadowMap.autoUpdate = au;
       this.scene.background = bg; this.scene.fog = fog; this.scene.overrideMaterial = ov;
       hidden.forEach((o) => { o.visible = true; });
+      // дым рисуем в маску с глубиной сцены (глубину не чистим — она общая с проходом нормалей)
+      const soft = this.soft.filter((o) => o.visible);
+      u.useSmoke.value = soft.length ? 1 : 0;
+      if (soft.length) {
+        const ac = renderer.autoClear;
+        renderer.autoClear = false;
+        renderer.setRenderTarget(this.srt);
+        renderer.setClearColor(0x000000, 1);
+        renderer.clear(true, false, false);
+        for (const o of soft) renderer.render(o, this.camera);
+        renderer.autoClear = ac;
+      }
+      renderer.setClearColor(this._cc, ca);
+      renderer.shadowMap.autoUpdate = au;
     }
     u.tDiffuse.value = readBuffer.texture;
     u.near.value = this.camera.near; u.far.value = this.camera.far;

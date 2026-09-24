@@ -171,7 +171,7 @@ function applyHandPose(f, p) {
   f.t1j.rotation.x = -p.t * 0.9;
 }
 
-export const SKIN = { metal: '#efcfb5', doll: '#f5d9cc', alien: '#e3e4e8', priest: '#e9c3a0' };
+export const SKIN = { metal: '#efcfb5', doll: '#f5d9cc', alien: '#e3e4e8', priest: '#e9c3a0', boss: '#f0c6a6', shaggy: '#ecd2bf' };
 
 export class Character {
   constructor(key, seat, fx) {
@@ -218,7 +218,7 @@ export class Character {
   build() {
     const key = this.key;
     const R = this.root;
-    const scale = { metal: 1.0, doll: 0.94, alien: 0.97, priest: 1.05 }[key];
+    const scale = { metal: 1.0, doll: 0.94, alien: 0.97, priest: 1.05, boss: 1.06, shaggy: 1.0 }[key];
     this.body = new THREE.Group();
     this.body.scale.setScalar(scale);
     R.add(this.body);
@@ -252,6 +252,22 @@ export class Character {
       M.legs = mat({ map: T.toTex(T.denimCanvas('#b8bcc3'), { repeat: [3, 3] }), roughness: 0.95 });
       M.shoe = mat({ color: '#f2f2f0', roughness: 0.5 });
       M.sole = mat({ color: '#ffffff', roughness: 0.6 });
+    } else if (key === 'boss') {
+      // тёмно-синий костюм, белая рубашка, синий галстук
+      M.top = mat({ color: '#223d6b', roughness: 0.62, sheen: 0.5, sheenColor: new THREE.Color('#5b7fc0'), sheenRoughness: 0.5 });
+      M.sleeve = M.top;
+      M.legs = M.top;
+      M.shoe = mat({ color: '#0d0d0f', roughness: 0.25, clearcoat: 0.9 });
+      M.sole = M.shoe;
+      M.tee = mat({ color: '#f4f5f7', roughness: 0.7 });
+      M.tie = mat({ color: '#2d56b3', roughness: 0.4, sheen: 0.6, sheenColor: new THREE.Color('#9fb8ff') });
+    } else if (key === 'shaggy') {
+      // чёрная футболка, тёмные джинсы, кеды
+      M.top = mat({ color: '#161618', roughness: 0.95 });
+      M.sleeve = M.top;
+      M.legs = mat({ map: T.toTex(T.denimCanvas('#3a4150'), { repeat: [3, 3] }), roughness: 0.95 });
+      M.shoe = mat({ color: '#1e1e20', roughness: 0.6 });
+      M.sole = mat({ color: '#e9e6df', roughness: 0.7 });
     } else {
       M.top = mat({ color: '#121213', roughness: 0.9, sheen: 0.6, sheenColor: new THREE.Color('#3a3a44'), sheenRoughness: 0.5 });
       M.sleeve = M.top;
@@ -277,7 +293,7 @@ export class Character {
         sph(0.018, M.satin, s * 0.12, 0.085, 0.6, B, 1.6, 0.8, 1);
       } else {
         bx(0.11, 0.09, 0.24, M.shoe, s * 0.12, 0.05, 0.53, B, 0.035);
-        if (key === 'alien') bx(0.115, 0.03, 0.25, M.sole, s * 0.12, 0.015, 0.53, B, 0.012);
+        if (key === 'alien' || key === 'shaggy') bx(0.115, 0.03, 0.25, M.sole, s * 0.12, 0.015, 0.53, B, 0.012);
       }
     }
     // таз
@@ -288,7 +304,7 @@ export class Character {
     this.torso.position.set(0, HIPS_Y, 0);
     B.add(this.torso);
     const Tq = this.torso;
-    const tw = key === 'alien' ? 1.28 : key === 'doll' ? 0.92 : 1.08;
+    const tw = key === 'alien' ? 1.28 : key === 'doll' ? 0.92 : key === 'boss' ? 1.14 : key === 'shaggy' ? 1.0 : 1.08;
     const torsoMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.25, 8, 24), M.top);
     torsoMesh.scale.set(tw, 1, key === 'alien' ? 0.82 : 0.72);
     torsoMesh.position.set(0, 0.27, 0);
@@ -315,7 +331,7 @@ export class Character {
       const up = new THREE.Mesh(new THREE.CapsuleGeometry(key === 'alien' ? 0.05 : 0.052, L1 - 0.06, 6, 14), key === 'doll' ? skin : M.sleeve);
       up.position.y = -L1 / 2;
       sh.add(up);
-      const fr = new THREE.Mesh(new THREE.CapsuleGeometry(0.046, L2 - 0.07, 6, 14), (key === 'doll' || key === 'alien') ? skin : M.sleeve);
+      const fr = new THREE.Mesh(new THREE.CapsuleGeometry(0.046, L2 - 0.07, 6, 14), (key === 'doll' || key === 'alien' || key === 'shaggy') ? skin : M.sleeve);
       fr.position.y = -L2 / 2;
       el.add(fr);
       // кисть
@@ -406,6 +422,26 @@ export class Character {
       for (let k = 0; k < 7; k++) sph(0.006, mat({ color: '#050505', roughness: 0.3 }), 0.0, 0.5 - k * 0.065, 0.126, Tq, 1, 1, 0.6, 8, 6);
       plack.castShadow = false;
     }
+    if (key === 'boss') {
+      // рубашка и галстук в вырезе пиджака, лацканы, пуговицы
+      bx(0.12, 0.3, 0.03, M.tee, 0, 0.33, 0.1, Tq, 0.01);
+      for (const s of [-1, 1]) {
+        const col = bx(0.045, 0.03, 0.02, M.tee, s * 0.028, 0.5, 0.075, Tq, 0.006);
+        col.rotation.z = s * 0.5;
+        const lap = bx(0.075, 0.26, 0.02, M.top, s * 0.08, 0.36, 0.116, Tq, 0.006);
+        lap.rotation.set(-0.12, s * 0.3, s * -0.3);
+      }
+      bx(0.034, 0.03, 0.02, M.tie, 0, 0.47, 0.113, Tq, 0.006);
+      const tie = bx(0.03, 0.22, 0.012, M.tie, 0, 0.34, 0.12, Tq, 0.004);
+      tie.rotation.x = -0.05;
+      const btnM = mat({ color: '#0e1a33', roughness: 0.4 });
+      for (const y of [0.17, 0.1]) sph(0.008, btnM, 0, y, 0.122, Tq, 1, 1, 0.5, 10, 8);
+      bx(0.36, 0.05, 0.25, M.top, 0, 0.06, 0.02, Tq, 0.02);
+    }
+    if (key === 'shaggy') {
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.011, 8, 24), M.top);
+      collar.rotation.x = Math.PI / 2 - 0.15; collar.position.set(0, 0.51, 0.012); Tq.add(collar);
+    }
     if (key === 'alien') {
       const hem = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.02, 8, 30), M.top);
       hem.rotation.x = Math.PI / 2; hem.scale.set(1.25, 0.82, 1); hem.position.y = 0.04; Tq.add(hem);
@@ -444,7 +480,7 @@ export class Character {
     const H = this.head;
     const F = this.face;
     const white = mat({ color: '#f8f6f2', roughness: 0.25, clearcoat: 1 });
-    const irisCol = { metal: '#4d6a7a', doll: '#6f9fd1', priest: '#4a3222' }[key];
+    const irisCol = { metal: '#4d6a7a', doll: '#6f9fd1', priest: '#4a3222', boss: '#6f93ad', shaggy: '#3b2416' }[key];
     F.eyes = [];
     if (key === 'alien') {
       const black = mat({ color: '#050507', roughness: 0.22, clearcoat: 0.6, clearcoatRoughness: 0.15, envMapIntensity: 0.25 });
@@ -467,7 +503,7 @@ export class Character {
     }
     const iris = mat({ color: irisCol, roughness: 0.2, clearcoat: 1 });
     const pupil = mat({ color: '#070707', roughness: 0.1, clearcoat: 1 });
-    const eyeR = key === 'priest' ? 0.031 : key === 'doll' ? 0.03 : 0.028;
+    const eyeR = key === 'priest' ? 0.031 : key === 'doll' ? 0.03 : key === 'shaggy' ? 0.032 : 0.028;
     for (const s of [-1, 1]) {
       const g = new THREE.Group();
       g.position.set(c.x + s * 0.054, c.y + 0.018, c.z + 0.118);
@@ -479,9 +515,11 @@ export class Character {
       F.eyes.push({ g, e, ir, pu, hl });
       this.headOnly.push(e, ir, pu, hl);
       // бровь
-      const bcol = { metal: '#2a1c14', doll: '#8a5a3a', priest: '#3b2415' }[key];
-      const brow = bx(0.05, 0.011, 0.014, mat({ color: bcol, roughness: 0.8 }), c.x + s * 0.056, c.y + 0.068, c.z + 0.132, H, 0.005);
+      const bcol = { metal: '#2a1c14', doll: '#8a5a3a', priest: '#3b2415', boss: '#b39574', shaggy: '#1b120c' }[key];
+      const brow = bx(0.05, key === 'shaggy' ? 0.014 : 0.011, 0.014, mat({ color: bcol, roughness: 0.8 }), c.x + s * 0.056, c.y + 0.068, c.z + 0.132, H, 0.005);
       brow.userData.side = s;
+      // Патлатый: одна бровь задрана, как на фото
+      if (key === 'shaggy') { brow.userData.dy = s < 0 ? 0.012 : -0.002; brow.userData.rz = s < 0 ? 0.25 : -0.15; }
       F.brows = F.brows || [];
       F.brows.push(brow);
       this.headOnly.push(brow);
@@ -494,7 +532,7 @@ export class Character {
       }
     }
     // нос
-    this.headOnly.push(sph(0.02, skin, 0, c.y - 0.02, c.z + 0.145, H, key === 'priest' ? 1 : 0.85, 1.25, 1));
+    this.headOnly.push(sph(0.02, skin, 0, c.y - 0.02, c.z + 0.145, H, key === 'priest' || key === 'boss' ? 1 : 0.85, key === 'shaggy' ? 1.55 : key === 'boss' ? 1.35 : 1.25, 1));
     // рот
     const mouthM = mat({ color: key === 'doll' ? '#d9607e' : '#3a0f10', roughness: 0.35 });
     F.mouth = sph(0.028, mouthM, 0, c.y - 0.072, c.z + 0.125, H, 1.25, 0.3, 0.55);
@@ -534,6 +572,14 @@ export class Character {
       F.brows.forEach((b) => { b.rotation.z = b.userData.side * -0.25; });
     }
     if (key === 'doll') { this.baseBrow = -0.1; this.lid = 0.8; }
+    if (key === 'boss') { this.baseMouth = 0.08; this.baseBrow = -0.15; this.lid = 0.85; }
+    if (key === 'shaggy') {
+      // выпученные глаза и губы уточкой
+      this.baseBrow = 0.7; this.lid = 1.2; this.baseMouth = 0.2;
+      F.o = true;
+      F.mouth.material.color.set('#b35a5e');
+      F.mouth.position.z += 0.012;
+    }
   }
 
   buildHair(c) {
@@ -562,7 +608,58 @@ export class Character {
       sph(0.008, hm, -0.006, 0.004, 0, heart); sph(0.008, hm, 0.006, 0.004, 0, heart);
       const tip = new THREE.Mesh(new THREE.ConeGeometry(0.0105, 0.016, 12), hm); tip.rotation.z = Math.PI; tip.position.y = -0.006; heart.add(tip);
     } else if (key === 'priest') hair = curls(H, c, '#4a2e1c', { n: 330, longN: 50, long: 0.06, seed: 11, size: 0.82, faceOpen: 0.45, top: 0.2 });
-    else {
+    else if (key === 'boss') {
+      // лысина; коротко стриженный светлый венчик на затылке и висках
+      const hm = mat({ color: '#b8987a', roughness: 0.95 });
+      // только затылок и виски за ушами: спереди вырез ±75°, чтобы не залезать на лицо
+      const ring = new THREE.Mesh(new THREE.SphereGeometry(0.153, 36, 16, Math.PI / 2 + 1.3, Math.PI * 2 - 2.6, Math.PI * 0.44, Math.PI * 0.22), hm);
+      ring.position.copy(c);
+      ring.scale.set(0.97, 1.08, 1.02);
+      ring.material.side = THREE.DoubleSide;
+      H.add(ring);
+      this.headOnly.push(ring);
+    } else if (key === 'shaggy') {
+      // тёмные лохматые волосы до плеч с пробором посередине
+      const hm = mat({ color: '#2a1a12', roughness: 0.7, sheen: 0.5, sheenColor: new THREE.Color('#6a4a36'), side: THREE.DoubleSide });
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.165, 40, 24, 0, Math.PI * 2, 0, Math.PI * 0.55), hm);
+      cap.position.copy(c).add(V(0, 0.012, -0.012));
+      cap.scale.set(1.0, 1.15, 1.04);
+      cap.rotation.x = -0.2;
+      H.add(cap);
+      this.headOnly.push(cap);
+      const prof = [];
+      for (let k = 0; k <= 14; k++) {
+        const a = (k / 14) * Math.PI * 0.6;
+        prof.push(new THREE.Vector2(Math.sin(a) * 0.178 + (k > 8 ? (k - 8) * 0.007 : 0), Math.cos(a) * 0.19));
+      }
+      for (let k = 1; k <= 6; k++) prof.push(new THREE.Vector2(0.2 + k * 0.012, prof[14].y - k * 0.035));
+      prof.push(new THREE.Vector2(0.255, prof[prof.length - 1].y - 0.012));
+      prof.push(new THREE.Vector2(0.18, prof[prof.length - 1].y + 0.01));
+      const mop = new THREE.Mesh(new THREE.LatheGeometry(prof, 40, 1.05, Math.PI * 2 - 2.1), hm);
+      mop.position.copy(c).add(V(0, 0.03, -0.01));
+      mop.scale.set(1.0, 1, 1.0);
+      H.add(mop);
+      this.headOnly.push(mop);
+      // торчащие пряди
+      const r = T.rng(23);
+      for (let i = 0; i < 26; i++) {
+        const a = Math.PI * (0.25 + r() * 1.5) * (r() < 0.5 ? 1 : -1);
+        const st = new THREE.Mesh(new THREE.CapsuleGeometry(0.02 + r() * 0.012, 0.1 + r() * 0.14, 4, 8), hm);
+        const rad = 0.17 + r() * 0.05;
+        st.position.set(c.x + Math.sin(a) * rad, c.y - 0.04 - r() * 0.14, c.z + Math.cos(a) * rad * 0.9 - 0.02);
+        st.rotation.set((r() - 0.5) * 0.8, 0, Math.sin(a) * (0.3 + r() * 0.4));
+        H.add(st);
+        this.headOnly.push(st);
+      }
+      // пряди, падающие на лоб с двух сторон пробора
+      for (const sd of [-1, 1]) {
+        const fr = new THREE.Mesh(new THREE.CapsuleGeometry(0.024, 0.1, 4, 10), hm);
+        fr.position.set(c.x + sd * 0.07, c.y + 0.09, c.z + 0.118);
+        fr.rotation.set(0.6, 0, sd * 1.05);
+        H.add(fr);
+        this.headOnly.push(fr);
+      }
+    } else {
       // тёмно-русое каре: раньше цвет почти совпадал с бледной кожей, и в мульт-стиле
       // (три ступени света) волосы сливались с головой — казалось, что их нет
       const hm = mat({ color: '#a8895a', roughness: 0.45, sheen: 1, sheenColor: new THREE.Color('#ffe2a8'), sheenRoughness: 0.3, side: THREE.DoubleSide });
@@ -599,7 +696,23 @@ export class Character {
     if (hair) this.headOnly.push(hair);
   }
 
-  hideHead(v) { this.headOnly.forEach((m) => { m.visible = !v; }); }
+  hideHead(v) {
+    if (this._hid === v) return;
+    this._hid = v;
+    this.headOnly.forEach((m) => { m.visible = !v; });
+  }
+
+  // пересадить на другое место за столом (персонажа выбирают отдельно от места)
+  setSeat(seat) {
+    if (this.seat === seat) return;
+    this.seat = seat;
+    this.root.position.copy(seatPos(seat));
+    this.root.rotation.y = seatYaw(seat);
+    this.root.updateMatrixWorld(true);
+    this.fanSnap = true;
+    this.lookAt = null;
+    this.netLook = null;
+  }
 
   // ---------- действия ----------
   play(name, opts = {}) {
@@ -642,8 +755,12 @@ export class Character {
 
     // взгляд
     let yawT = 0, pitchLook = 0.08;
+    const nl = this.netLook;
     if (this.fp) { yawT = this.fp.yaw; pitchLook = this.fp.pitch; }
-    else if (this.lookAt) {
+    else if (nl && performance.now() - nl.t < 4000) {
+      // живой игрок в мультиплеере: голова смотрит туда же, куда он смотрит у себя
+      yawT = clamp(nl.yaw, -1.5, 1.5); pitchLook = clamp(nl.pitch, -0.6, 0.9);
+    } else if (this.lookAt) {
       const eye = this.eyeWorld();
       const d = this.lookAt.clone().sub(eye);
       const inv = this.root.quaternion.clone().invert();
@@ -810,7 +927,7 @@ export class Character {
     const lid = (s.blink > 0 ? 0.1 : 1) * s.eye;
     const F = this.face;
     F.eyes.forEach((e) => { e.g.scale.y = clamp(lid, 0.05, 1.4); });
-    if (F.brows) F.brows.forEach((b) => { b.position.y = this.headC.y + 0.068 + s.brow * 0.014; b.rotation.z = b.userData.side * (-0.12 * s.brow) + (this.key === 'priest' ? b.userData.side * -0.2 : 0); });
+    if (F.brows) F.brows.forEach((b) => { b.position.y = this.headC.y + 0.068 + s.brow * 0.014 + (b.userData.dy || 0); b.rotation.z = b.userData.side * (-0.12 * s.brow) + (this.key === 'priest' ? b.userData.side * -0.2 : 0) + (b.userData.rz || 0); });
     const mo = clamp(s.mouth, 0, 1.3);
     if (F.o) F.mouth.scale.set(0.7 + mo * 0.4, 0.7 + mo * 0.6, 0.6);
     else F.mouth.scale.set(1.25 - mo * 0.15, F.mouthBase + mo * 0.9, 0.55);

@@ -83,6 +83,8 @@
   .seg button:hover { color: var(--bone); }
   .seg button.on { background: linear-gradient(180deg, #f2b456, #c67f22); color: #1c1006; }
   .lobby-tod { display: grid; gap: 6px; min-width: 260px; }
+  .lobby-tod.small { min-width: 170px; }
+  .seg.two { grid-template-columns: repeat(2, 1fr); }
   .links { display: flex; gap: 18px; font-size: 14px; color: var(--muted); }
   .links button { text-decoration: underline; text-underline-offset: 3px; }
 
@@ -93,6 +95,11 @@
   .code { display: flex; align-items: center; gap: 14px; }
   .code b { font: 700 34px var(--mono); letter-spacing: 0.18em; color: var(--amber-hi); }
   .chars { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .chars.pick { grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .chars.pick .char .nm { font-size: 17px; }
+  .chars.pick .char .info { padding: 24px 9px 9px; }
+  .char .seatno { position: absolute; top: 8px; left: 8px; font: 700 12px var(--mono); padding: 2px 7px; border-radius: 7px; background: rgba(12,8,6,0.8); color: var(--amber-hi); }
+  .char.empty img { opacity: 0.18; filter: grayscale(1); }
   .char { position: relative; border-radius: 16px; overflow: hidden; background: #1a120d; border: 1px solid var(--line); text-align: left; transition: transform .15s ease, border-color .15s ease, box-shadow .2s ease; }
   .char:hover { transform: translateY(-3px); border-color: rgba(233,164,67,0.6); }
   .char img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; background: #0d0907; }
@@ -133,7 +140,7 @@
   .pips i.dead { background: var(--poison); box-shadow: 0 0 8px var(--poison); }
   .risk { font: 700 11px var(--mono); color: var(--amber-hi); }
 
-  .me-panel { position: absolute; left: 16px; bottom: calc(72px + env(safe-area-inset-bottom)); display: grid; gap: 6px; padding: 12px 14px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); min-width: 170px; }
+  .me-panel { position: absolute; left: 16px; top: calc(60px + env(safe-area-inset-top)); display: grid; gap: 6px; padding: 12px 14px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); min-width: 170px; }
   .me-panel .nm { font: 400 22px var(--display); color: var(--amber); }
   .me-panel .risk { font-size: 12px; }
 
@@ -222,15 +229,14 @@
   @media (max-width: 1180px) {
     .key small, #kEsc { display: none; }
     .key { padding: 7px 10px; font-size: 13px; }
-    .me-panel { bottom: calc(66px + env(safe-area-inset-bottom)); }
   }
   @media (max-width: 900px) {
     .keys { gap: 5px; }
     .key kbd { margin-right: 4px; }
-    .me-panel { display: none; }
   }
   @media (max-width: 760px) {
     .chars { grid-template-columns: repeat(2, 1fr); }
+    .chars.pick { grid-template-columns: repeat(3, 1fr); }
     .code b { font-size: 26px; }
     .actions .btn { min-width: 0; padding: 12px 16px; font-size: 15px; }
     #liarBtn { font-size: 20px; }
@@ -269,6 +275,10 @@
     </div>
     <label class="label" for="nameIn">Как тебя звать</label>
     <input id="nameIn" class="field" maxlength="16" placeholder="Имя за столом" autocomplete="off">
+    <div class="label">Столик</div>
+    <div class="seg" id="tblMenu"><button data-tbl="center">Центральный</button><button data-tbl="counter">У стойки</button><button data-tbl="ropes">У верёвок</button></div>
+    <div class="label">Погода</div>
+    <div class="seg two" id="wxMenu"><button data-wx="clear">Ясно</button><button data-wx="rain">Дождь</button></div>
     <div class="label">Время суток</div>
     <div class="seg" id="todMenu"><button data-tod="day">День</button><button data-tod="evening">Вечер</button><button data-tod="night">Ночь</button></div>
     <button id="createBtn" class="btn">Создать комнату</button>
@@ -290,13 +300,17 @@
         <div class="label">Комната</div>
         <div class="code"><b id="roomCode">—</b><button id="copyBtn" class="btn ghost" style="padding:10px 14px">Скопировать ссылку</button></div>
       </div>
+      <div class="lobby-tod"><div class="label">Столик</div><div class="seg" id="tblLobby"><button data-tbl="center">Центральный</button><button data-tbl="counter">У стойки</button><button data-tbl="ropes">У верёвок</button></div></div>
+      <div class="lobby-tod small"><div class="label">Погода</div><div class="seg two" id="wxLobby"><button data-wx="clear">Ясно</button><button data-wx="rain">Дождь</button></div></div>
       <div class="lobby-tod"><div class="label">Время суток</div><div class="seg" id="todLobby"><button data-tod="day">День</button><button data-tod="evening">Вечер</button><button data-tod="night">Ночь</button></div></div>
       <div class="people" id="people"></div>
     </div>
-    <div class="label">Выбери место за столом</div>
-    <div class="chars" id="chars"></div>
+    <div class="label">Места за столом — кликни, чтобы сесть или встать</div>
+    <div class="chars" id="seats"></div>
+    <div class="label">Твой персонаж</div>
+    <div class="chars pick" id="chars"></div>
     <div class="lobby-foot">
-      <div style="color:var(--muted);font-size:14px;max-width:52ch;line-height:1.45">Свободные места займут боты. Начать может любой, кто сел за стол.</div>
+      <div style="color:var(--muted);font-size:14px;max-width:52ch;line-height:1.45" id="lobbyHint">Свободные места займут боты. Начать может любой, кто сел за стол.</div>
       <div class="row" style="flex:0 0 auto">
         <button id="leaveBtn" class="btn ghost">Выйти</button>
         <button id="startBtn" class="btn">Начать партию</button>
@@ -307,7 +321,6 @@
 
 <section id="hud" class="hidden">
   <div class="roomtag" id="roomTag"></div>
-  <div class="feed" id="feed"></div>
   <div class="tablebadge" id="tableBadge"><img id="tableImg" alt=""><div><div class="t1" id="tableName">Стол королей</div><div class="t2" id="roundName">Раунд 1</div></div></div>
   <div id="plates"></div>
   <div class="timer" id="timer"><i id="timerBar"></i></div>

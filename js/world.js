@@ -11,8 +11,21 @@ export const SEAT_R = 1.04;
 // навес беседки: открыт на север и запад, сзади (юг) и справа-сзади — деревянные стены
 export const GZ = { x0: -1.5, x1: 5.0, zN: -1.9, zS: 2.15 };
 // вход во двор — калитка в дальнем левом (северо-западном) углу; каменный цоколь с будкой — слева
-const GATE = { x0: -3.3, x1: -2.4 };
-const PLAT = { x0: -6.6, x1: -3.9, z0: -3.4, z1: 2.8 };
+// Размеры сняты с фото 1: калитка ≈ в 6,5–7 м от глаз игрока (≈3,5 м за столбом),
+// перед ней подъём на две ступеньки; слева за каменной стенкой — лестница вниз в бар.
+const GATE = { x0: -2.65, x1: -1.8 };
+const FENCE_Z = -5.6;
+const TERRACE = { x0: -3.75, x1: -0.9, z0: -4.1, step: 0.16 };
+const STAIR = { x0: -5.3, x1: -3.9, z0: -3.4, z1: 1.9 }; // проём лестницы в подвал
+const PLAT = { x0: -7.0, x1: -5.3, z0: -3.7, z1: 2.4 }; // цоколь будки за лестницей
+// Где стоит игровой стол (в координатах навеса) и какие столики стоят вокруг
+export const TABLES = ['center', 'counter', 'ropes'];
+export const TABLE_NAMES = { center: 'Центральный', counter: 'У стойки', ropes: 'У верёвок' };
+const LAYOUT = {
+  center: { at: [0, 0], decor: [[2.45, 0.55, 0.46, [0.4, 1.75, 3.3, 4.85]], [3.95, -0.85, 0.43, [0.9, 2.5, 4.0, 5.6]]] },
+  counter: { at: [2.6, 0.45], decor: [[0.1, 0.15, 0.46, [0.3, 1.9, 3.5, 5.0]], [4.1, -1.1, 0.4, [2.4, 3.9, 5.4]]] },
+  ropes: { at: [3.55, -0.6], decor: [[0.0, 0.0, 0.46, [0.3, 1.9, 3.5, 5.0]], [1.3, 1.2, 0.42, [0.8, 2.3, 3.9, 5.4]]] },
+};
 
 export const seatAngle = (i) => i * Math.PI / 2;
 export const seatPos = (i) => new THREE.Vector3(Math.sin(seatAngle(i)) * SEAT_R, 0, Math.cos(seatAngle(i)) * SEAT_R);
@@ -54,8 +67,15 @@ function jitter(geo, amt, seed = 1) {
   return geo;
 }
 
-export function buildWorld(scene) {
+export function buildWorld(root) {
   const W = { bulbs: [], flicker: [], bottles: [], lights: {} };
+  // Окружение (навес, двор, соседние столики) — отдельная группа: при выборе другого
+  // столика она сдвигается так, чтобы игровой стол всегда стоял в начале координат.
+  const scene = new THREE.Group();
+  root.add(scene);
+  W.env = scene;
+  const game = new THREE.Group(); // игровой стол, стулья, реквизит
+  root.add(game);
 
   // ---------- материалы ----------
   const woodDarkC = T.woodCanvas({ base: '#4a2c18', dark: '#1d0f06', light: '#7a4d2a', planks: 5, seed: 2 });
@@ -79,12 +99,20 @@ export function buildWorld(scene) {
   // ---------- небо ----------
   const sky = new THREE.Mesh(new THREE.SphereGeometry(80, 48, 32), new THREE.MeshBasicMaterial({ map: T.toTex(T.skyCanvas()), side: THREE.BackSide, fog: false, depthWrite: false }));
   sky.rotation.y = Math.PI * 0.5;
-  scene.add(sky);
+  root.add(sky);
   W.sky = sky;
-  scene.fog = new THREE.FogExp2('#1f1814', 0.018);
+  root.fog = new THREE.FogExp2('#1f1814', 0.018);
 
-  // ---------- пол ----------
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), floorMat);
+  // ---------- пол: брусчатка с проёмом под лестницу в подвальный бар ----------
+  const fs = new THREE.Shape();
+  fs.moveTo(-30, -30); fs.lineTo(30, -30); fs.lineTo(30, 30); fs.lineTo(-30, 30); fs.closePath();
+  const hole = new THREE.Path();
+  // форма лежит в XY, после поворота на −90° по X ось Y формы смотрит в −Z мира
+  hole.moveTo(STAIR.x0, -STAIR.z1); hole.lineTo(STAIR.x0, -STAIR.z0); hole.lineTo(STAIR.x1, -STAIR.z0); hole.lineTo(STAIR.x1, -STAIR.z1); hole.closePath();
+  fs.holes.push(hole);
+  floorMat.map.repeat.set(25 / 60, 25 / 60); floorMat.bumpMap.repeat.set(25 / 60, 25 / 60);
+  const floor = new THREE.Mesh(new THREE.ShapeGeometry(fs), floorMat);
+  W.floorMat = floorMat;
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
@@ -197,43 +225,50 @@ export function buildWorld(scene) {
     gz.add(rope);
   }
 
-  // ---------- стол и стулья ----------
+  // ---------- игровой стол и стулья (всегда в начале координат) ----------
   W.table = buildTable(TABLE_R, woodDark);
-  scene.add(W.table);
+  game.add(W.table);
   W.chairs = [];
   for (let i = 0; i < 4; i++) {
     const ch = buildChair();
     const p = seatPos(i);
     ch.position.set(p.x * 1.02, 0, p.z * 1.02);
     ch.rotation.y = seatYaw(i);
-    scene.add(ch);
+    game.add(ch);
     W.chairs.push(ch);
   }
-  // соседние столики под навесом (фото 2): ближний и дальний у низкой стенки, венские стулья
-  for (const [tx, tz, tr, chs] of [[2.45, 0.55, 0.46, [0.4, 1.75, 3.3, 4.85]], [3.95, -0.85, 0.43, [0.9, 2.5, 4.0, 5.6]]]) {
-    const t = buildTable(tr, woodDark);
-    t.position.set(tx, 0, tz);
-    scene.add(t);
-    chs.forEach((a) => {
-      const ch = buildChair();
-      ch.position.set(tx + Math.sin(a) * (tr + 0.36), 0, tz + Math.cos(a) * (tr + 0.36));
-      ch.rotation.y = a + Math.PI;
-      scene.add(ch);
-      W.chairs.push(ch);
-    });
+  // соседние столики с венскими стульями: свой набор для каждого выбора игрового стола
+  W.decor = {};
+  for (const [name, L] of Object.entries(LAYOUT)) {
+    const g = new THREE.Group();
+    g.visible = false;
+    scene.add(g);
+    W.decor[name] = g;
+    for (const [tx, tz, tr, chs] of L.decor) {
+      const t = buildTable(tr, woodDark);
+      t.position.set(tx, 0, tz);
+      g.add(t);
+      chs.forEach((a) => {
+        const ch = buildChair();
+        ch.position.set(tx + Math.sin(a) * (tr + 0.36), 0, tz + Math.cos(a) * (tr + 0.36));
+        ch.rotation.y = a + Math.PI;
+        g.add(ch);
+      });
+    }
+    shadow(g, true, true);
   }
   // ---------- реквизит на игровом столе ----------
   W.ashtray = buildAshtray();
   W.ashtray.position.set(-0.12, TABLE_Y, 0.1);
-  scene.add(W.ashtray);
+  game.add(W.ashtray);
   W.pack = buildPack();
   W.pack.position.set(0.2, TABLE_Y + 0.011, -0.16);
   W.pack.rotation.y = 0.5;
-  scene.add(W.pack);
+  game.add(W.pack);
   const lighter = new THREE.Mesh(new RoundedBoxGeometry(0.025, 0.012, 0.075, 2, 0.005), mat({ color: '#f0b400', roughness: 0.3 }));
   lighter.position.set(0.3, TABLE_Y + 0.006, -0.05);
   lighter.rotation.y = -0.3;
-  scene.add(lighter);
+  game.add(lighter);
 
   const label = T.toTex(T.labelCanvas());
   for (let i = 0; i < 4; i++) {
@@ -246,7 +281,7 @@ export function buildWorld(scene) {
     b.group.position.set(p.x + local.x, TABLE_Y, p.z + local.z);
     b.group.rotation.y = yaw + Math.PI;
     b.home = { pos: b.group.position.clone(), quat: b.group.quaternion.clone() };
-    scene.add(b.group);
+    game.add(b.group);
     W.bottles.push(b);
   }
 
@@ -255,7 +290,7 @@ export function buildWorld(scene) {
 
   // ---------- свет ----------
   const hemi = new THREE.HemisphereLight('#9aa2cf', '#4a3522', TOON ? 1.25 : 0.9);
-  scene.add(hemi);
+  root.add(hemi);
   const sun = new THREE.DirectionalLight('#ffb27a', 2.1);
   sun.position.set(-14, 6.5, -6);
   sun.target.position.set(0, 0, 0);
@@ -264,7 +299,7 @@ export function buildWorld(scene) {
   Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 10, bottom: -6, near: 1, far: 40 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.02;
-  scene.add(sun, sun.target);
+  root.add(sun, sun.target);
   const key = new THREE.SpotLight('#ffd49a', 5.5, 6, 1.0, 0.9, 2);
   key.position.set(0, 2.42, 0.05);
   key.target.position.set(0, TABLE_Y, 0);
@@ -273,7 +308,7 @@ export function buildWorld(scene) {
   key.shadow.bias = -0.0002;
   key.shadow.normalBias = 0.01;
   key.shadow.radius = 4;
-  scene.add(key, key.target);
+  root.add(key, key.target);
   const fill = new THREE.PointLight('#ff9d5c', 2.2, 7, 2);
   fill.position.set(-1.0, 2.1, 0.6);
   scene.add(fill);
@@ -281,21 +316,31 @@ export function buildWorld(scene) {
   back.position.set(2.8, 2.2, 0.9);
   scene.add(back);
   W.lights = { hemi, sun, key, fill, back };
-  W.setTime = (tod) => setTime(W, scene, tod);
+  W.setTime = (tod) => setTime(W, root, tod);
+  W.setWeather = (wx) => { W.wx = wx === 'rain' ? 'rain' : 'clear'; setTime(W, root, W.tod); };
+  // где крыша навеса (в мировых координатах) — под ней дождь не идёт
+  W.roofRect = () => ({ x0: GZ.x0 - 0.45 + scene.position.x, x1: GZ.x1 + 0.45 + scene.position.x, z0: GZ.zN - 0.45 + scene.position.z, z1: GZ.zS + 0.2 + scene.position.z });
+  W.setLayout = (name) => {
+    const L = LAYOUT[name] ? name : 'center';
+    W.layout = L;
+    scene.position.set(-LAYOUT[L].at[0], 0, -LAYOUT[L].at[1]);
+    for (const [k, g] of Object.entries(W.decor)) g.visible = k === L;
+    scene.updateMatrixWorld(true);
+  };
 
   // ---------- гирлянды: от северного свеса беседки во двор (фото 2) ----------
   const eaveZ = ZN - 0.38;
   const lines = [
     [[X0, H + 0.02, eaveZ], [X1, H + 0.02, eaveZ], 0.18],
-    [[0.2, H + 0.02, eaveZ], [0.9, 3.1, -6.35], 0.55],
-    [[2.4, H + 0.02, eaveZ], [3.6, 3.1, -6.3], 0.55],
-    [[X1, H + 0.02, eaveZ], [5.3, 3.0, -5.6], 0.45],
-    [[0.9, 3.1, -6.35], [3.6, 3.1, -6.3], 0.35],
+    [[0.2, H + 0.02, eaveZ], [0.9, 3.1, FENCE_Z + 0.5], 0.45],
+    [[2.4, H + 0.02, eaveZ], [3.6, 3.1, FENCE_Z + 0.5], 0.45],
+    [[X1, H + 0.02, eaveZ], [5.15, 3.1, FENCE_Z + 0.9], 0.35],
+    [[0.9, 3.1, FENCE_Z + 0.5], [3.6, 3.1, FENCE_Z + 0.5], 0.35],
     [[X0, H + 0.02, eaveZ], [-2.6, 3.4, -3.2], 0.3],
   ];
   buildStringLights(scene, W, lines);
   // тёплые точки двора
-  for (const [x, y, z, i] of [[1.8, 2.7, -4.3, 2.4], [4.2, 2.6, -4.9, 2], [-2.9, 2.9, -2.6, 2], [-5.4, 3.1, -1.0, 2.2]]) {
+  for (const [x, y, z, i] of [[1.8, 2.7, -3.8, 2.4], [4.2, 2.6, -4.2, 2], [-2.9, 2.9, -2.6, 2], [-4.6, 2.9, -1.0, 2.2]]) {
     const pl = new THREE.PointLight('#ffb866', i, 8, 2);
     pl.position.set(x, y, z);
     scene.add(pl);
@@ -307,7 +352,11 @@ export function buildWorld(scene) {
   W.chairs.forEach((c) => shadow(c, true, true));
   W.setTime('evening');
   // всё неподвижное сливаем по материалам: сотни вызовов отрисовки превращаются в десятки
-  W.merge = mergeStatic(scene, { flatten: true, cell: 3, skipTrees: [W.speaker, ...W.bottles.map((b) => b.group)] });
+  const decor = Object.values(W.decor);
+  W.merge = mergeStatic(scene, { flatten: true, cell: 3, skipTrees: [W.speaker, ...decor] });
+  decor.forEach((g) => mergeStatic(g, { flatten: true }));
+  mergeStatic(game, { flatten: true, skipTrees: W.bottles.map((b) => b.group) });
+  W.setLayout('center');
   // бутылки и колонка двигаются целиком — внутри них тоже склеиваем всё, кроме анимируемых деталей
   W.bottles.forEach((b) => mergeStatic(b.group, { skip: new Set([b.liquid]) }));
   const su = W.speaker.userData;
@@ -333,18 +382,28 @@ const TOD = {
   },
 };
 const skyTex = {};
+const RAIN_GREY = new THREE.Color('#6b7079');
 function setTime(W, scene, tod) {
   const P = TOD[tod] || TOD.evening;
   W.tod = TOD[tod] ? tod : 'evening';
-  W.exposure = P.exposure;
-  if (!skyTex[W.tod]) skyTex[W.tod] = T.toTex(T.skyCanvas(W.tod));
-  W.sky.material.map = skyTex[W.tod];
+  const rain = W.wx === 'rain';
+  W.exposure = P.exposure * (rain ? 0.95 : 1);
+  const sk = rain ? `${W.tod}-rain` : W.tod;
+  if (!skyTex[sk]) skyTex[sk] = T.toTex(T.skyCanvas(sk));
+  W.sky.material.map = skyTex[sk];
   scene.background.set(P.bg);
+  // дождь: пасмурно, туман гуще и серее, солнце почти не пробивается, брусчатка мокрая и тёмная
   scene.fog.color.set(P.fog[0]);
-  scene.fog.density = P.fog[1];
+  if (rain) { scene.fog.color.lerp(RAIN_GREY, W.tod === 'night' ? 0.15 : 0.45); scene.background.lerp(RAIN_GREY, W.tod === 'night' ? 0.1 : 0.4); }
+  scene.fog.density = P.fog[1] * (rain ? 1.7 : 1) + (rain ? 0.008 : 0);
+  if (W.floorMat) {
+    W.floorMat.color.set(rain ? '#9aa0a8' : '#d8dce2');
+    if (W.floorMat.roughness !== undefined) W.floorMat.roughness = rain ? 0.2 : 0.62;
+  }
   const L = W.lights;
-  L.hemi.color.set(P.hemi[0]); L.hemi.groundColor.set(P.hemi[1]); L.hemi.intensity = TOON ? P.hemi[2] : P.hemi[3];
-  L.sun.color.set(P.sun[0]); L.sun.intensity = P.sun[1]; L.sun.position.set(...P.sun[2]);
+  L.hemi.color.set(P.hemi[0]); L.hemi.groundColor.set(P.hemi[1]); L.hemi.intensity = (TOON ? P.hemi[2] : P.hemi[3]) * (rain ? 0.85 : 1);
+  if (rain) L.hemi.color.lerp(RAIN_GREY, 0.5);
+  L.sun.color.set(P.sun[0]); L.sun.intensity = P.sun[1] * (rain ? 0.3 : 1); L.sun.position.set(...P.sun[2]);
   L.key.intensity = P.key; L.fill.intensity = P.fill; L.back.intensity = P.back;
   if (W.bulbM) W.bulbM.emissiveIntensity = P.bulbs;
   W.flicker.forEach((f) => { f.base = f.base0 * P.flicker; });
@@ -481,8 +540,9 @@ function buildPack() {
 export function buildBottle(labelTex) {
   const group = new THREE.Group();
   const glassM = mat({
-    color: '#fff3e6', transmission: 1, roughness: 0.03, thickness: 0.05, ior: 1.5,
-    attenuationColor: '#e39a55', attenuationDistance: 0.4, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.2,
+    // без лака и с приглушённым отражением: раньше блики на стекле выбивались в засветы
+    color: '#fff3e6', transmission: 1, roughness: 0.12, thickness: 0.05, ior: 1.45, specularIntensity: 0.45,
+    attenuationColor: '#e39a55', attenuationDistance: 0.4, envMapIntensity: 0.45,
   });
   const body = new THREE.Mesh(new RoundedBoxGeometry(0.12, 0.155, 0.056, 5, 0.022), glassM);
   body.position.y = 0.0775;
@@ -504,7 +564,7 @@ export function buildBottle(labelTex) {
   // жидкость
   const liqGeo = new THREE.BoxGeometry(0.104, 0.14, 0.042);
   liqGeo.translate(0, 0.07, 0);
-  const liqM = mat({ keep: true, color: '#7a3510', roughness: 0.08, emissive: '#5a2206', emissiveIntensity: 0.35, clearcoat: 1 });
+  const liqM = mat({ keep: true, color: '#7a3510', roughness: 0.25, emissive: '#5a2206', emissiveIntensity: 0.08 });
   const liquid = new THREE.Mesh(liqGeo, liqM);
   liquid.position.y = 0.008;
   group.add(liquid);
@@ -558,14 +618,14 @@ function buildStringLights(scene, W, lines) {
 function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
   const r = T.rng(71);
   const { x0: X0, x1: X1, zN: ZN } = GZ;
-  const FZ = -6.8; // северная граница двора (заборы)
+  const FZ = FENCE_Z; // северная граница двора (заборы)
 
   // ---------- бежевая соседская стена (восток): видна за верёвками и во дворе, на ней мурал ----------
   const neighbour = new THREE.Mesh(new THREE.BoxGeometry(6, 6.5, 15.6), mat({ map: T.toTex(T.blockWallCanvas(), { repeat: [7, 7] }), roughness: 0.92 }));
   neighbour.position.set(X1 + 0.45 + 3, 3.25, -0.2);
   scene.add(neighbour);
   // мурал: бородач в наушниках, в раме, над низкой сланцевой стенкой
-  const mz = -4.35;
+  const mz = FZ + 1.85;
   const mural = new THREE.Mesh(new THREE.PlaneGeometry(3.3, 1.85), mat({ map: T.toTex(T.muralCanvas()), roughness: 0.8 }));
   mural.position.set(X1 + 0.43, 1.62, mz);
   mural.rotation.y = -Math.PI / 2;
@@ -603,12 +663,21 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
   // ---------- вход: серая калитка в дальнем левом углу двора, рыжий забор уходит от неё к будке ----------
   const gateM = mat({ color: '#6c7076', roughness: 0.55, metalness: 0.35 });
   const gw = GATE.x1 - GATE.x0;
-  for (let x = GATE.x0; x < GATE.x1 - 0.05; x += 0.1) scene.add(box(0.08, 2.1, 0.03, gateM, x + 0.05, 1.05, FZ));
-  scene.add(box(gw, 0.06, 0.05, gateM, (GATE.x0 + GATE.x1) / 2, 0.3, FZ + 0.03), box(gw, 0.06, 0.05, gateM, (GATE.x0 + GATE.x1) / 2, 1.9, FZ + 0.03));
-  for (const x of [GATE.x0, GATE.x1]) scene.add(box(0.1, 2.25, 0.1, gateM, x, 1.12, FZ + 0.04));
+  const ty = TERRACE.step * 2; // калитка стоит на площадке, к ней подъём на две ступеньки
+  for (let x = GATE.x0; x < GATE.x1 - 0.05; x += 0.1) scene.add(box(0.08, 2.1, 0.03, gateM, x + 0.05, ty + 1.05, FZ));
+  scene.add(box(gw, 0.06, 0.05, gateM, (GATE.x0 + GATE.x1) / 2, ty + 0.3, FZ + 0.03), box(gw, 0.06, 0.05, gateM, (GATE.x0 + GATE.x1) / 2, ty + 1.9, FZ + 0.03));
+  for (const x of [GATE.x0, GATE.x1]) scene.add(box(0.1, 2.25, 0.1, gateM, x, ty + 1.12, FZ + 0.04));
+  // площадка у калитки и ступеньки к ней (светлый бетон): спереди и справа
+  const concM = mat({ color: '#b9b4aa', roughness: 0.9 });
+  const T0 = TERRACE, sw = 0.32;
+  const up = box(T0.x1 - T0.x0, ty, T0.z0 - FZ, concM, (T0.x0 + T0.x1) / 2, ty / 2, (T0.z0 + FZ) / 2);
+  const st1 = box(T0.x1 - T0.x0 + sw, T0.step, sw, concM, (T0.x0 + T0.x1 + sw) / 2, T0.step / 2, T0.z0 + sw / 2);
+  const st2 = box(sw, T0.step, T0.z0 - FZ, concM, T0.x1 + sw / 2, T0.step / 2, (T0.z0 + FZ) / 2);
+  shadow(up); shadow(st1); shadow(st2);
+  scene.add(up, st1, st2);
   // рыжий забор: из угла у калитки по диагонали к каменному цоколю будки (за деревом)
   const redM = mat({ map: T.toTex(T.woodCanvas({ w: 512, h: 512, base: '#7a3e2a', dark: '#3a1a10', light: '#a5623f', planks: 1, gaps: false, seed: 63 })), roughness: 0.8 });
-  const ra = V3(GATE.x0, 0, FZ), rb = V3(PLAT.x1, 0, PLAT.z0);
+  const ra = V3(GATE.x0, 0, FZ), rb = V3(STAIR.x1 + 0.25, 0, STAIR.z0 - 0.25); // до угла каменной стенки лестницы
   const rlen = ra.distanceTo(rb), rang = Math.atan2(rb.x - ra.x, rb.z - ra.z);
   const red = new THREE.Group();
   red.position.copy(ra);
@@ -630,7 +699,7 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
   // ---------- катушки-столы во дворе (три, фото 2; одна видна и на фото 1) ----------
   const spoolWood = mat({ map: T.toTex(T.woodCanvas({ w: 512, h: 512, base: '#5f5a55', dark: '#2a2622', light: '#8a837b', planks: 6, seed: 44 })), roughness: 0.85 });
   const spoolTop = mat({ color: '#d4d0c6', roughness: 0.4, metalness: 0.1 });
-  for (const [x, z] of [[0.7, -5.3], [2.6, -5.35], [3.95, -4.0]]) {
+  for (const [x, z] of [[0.9, -4.45], [2.9, -3.5], [4.05, -2.75]]) {
     const g = new THREE.Group();
     const top = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.06, 40), [spoolWood, spoolTop, spoolWood]);
     top.position.y = 0.98; g.add(top);
@@ -649,22 +718,23 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
   }
 
   // ---------- запад: клумба с деревом, камни, каменная скамья-стенка ----------
-  const gW = PLAT.x1 - (-2.0);
+  const PX = STAIR.x1 + 0.25; // наружная грань каменной стенки лестницы
+  const gW = PX - (-2.0);
   const gravel = new THREE.Mesh(new THREE.PlaneGeometry(-gW, 5.2), mat({ map: T.toTex(gravelCanvas(), { repeat: [2, 4] }), roughness: 1 }));
   gravel.rotation.x = -Math.PI / 2;
-  gravel.position.set((PLAT.x1 - 2.0) / 2, 0.03, -0.65);
+  gravel.position.set((PX - 2.0) / 2, 0.03, -0.65);
   gravel.receiveShadow = true;
   scene.add(gravel);
   // скамья-стенка из сланца с доской сверху — сразу слева от игрового стола
   const bench = box(0.36, 0.55, 3.2, slate, -2.0, 0.275, 0.3);
   scene.add(bench, box(0.5, 0.06, 3.3, woodDark, -2.0, 0.58, 0.3));
-  scene.add(box(-gW, 0.3, 0.28, slate, (PLAT.x1 - 2.0) / 2, 0.15, -3.25)); // бортик клумбы
+  scene.add(box(-gW, 0.3, 0.28, slate, (PX - 2.0) / 2, 0.15, -3.25)); // бортик клумбы
   shadow(bench);
   // груда светлых камней у дерева
   const rockM = mat({ color: '#a79e91', roughness: 0.9 });
   for (let i = 0; i < 9; i++) {
     const rk = new THREE.Mesh(jitter(new THREE.IcosahedronGeometry(0.12 + r() * 0.12, 1), 0.08, i + 90), rockM);
-    rk.position.set(-3.35 + (r() - 0.5) * 0.6, 0.08 + r() * 0.12, -0.55 + (r() - 0.5) * 0.6);
+    rk.position.set(-3.1 + (r() - 0.5) * 0.5, 0.08 + r() * 0.12, -0.55 + (r() - 0.5) * 0.6);
     rk.scale.y = 0.7;
     shadow(rk);
     scene.add(rk);
@@ -688,7 +758,8 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
     tree.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.045, 6), bark));
   }
   const leafMs = ['#6e9a3a', '#86b04a', '#9cc254'].map((c) => mat({ color: c, roughness: 0.75 }));
-  for (const [a, h, l] of [[0.3, 2.8, 1.9], [1.9, 3.3, 1.6], [3.4, 3.0, 1.5], [4.9, 3.6, 1.7], [0.9, 4.0, 1.2]]) {
+  // ветки растут в сторону от навеса (на запад и север), чтобы не протыкать крышу
+  for (const [a, h, l] of [[2.2, 3.0, 1.5], [3.0, 3.6, 1.3], [3.8, 3.2, 1.4], [4.6, 3.6, 1.6], [1.6, 4.1, 1.0]]) {
     const c = new THREE.CatmullRomCurve3([
       trunkCurve.getPoint(h / 4.6), V3(Math.cos(a) * l * 0.5, h + 0.45, Math.sin(a) * l * 0.5), V3(Math.cos(a) * l, h + 0.6, Math.sin(a) * l),
     ]);
@@ -698,6 +769,9 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
       const p = c.getPoint(0.35 + r() * 0.65);
       const lf = new THREE.Mesh(jitter(new THREE.IcosahedronGeometry(0.28 + r() * 0.3, 1), 0.2, i + a * 10), leafMs[i % 3]);
       lf.position.set(p.x + (r() - 0.5) * 0.6, p.y - 0.1 - r() * 0.5, p.z + (r() - 0.5) * 0.6);
+      // крыша навеса начинается в ~1 м к востоку от ствола: листва туда не заходит
+      lf.position.x = Math.min(lf.position.x, 0.55);
+      if (lf.position.x < -0.9) lf.position.y = Math.max(lf.position.y, 3.75); // и не лезет в навес над лестницей
       lf.scale.set(1, 0.6 + r() * 0.5, 1);
       tree.add(lf);
     }
@@ -707,15 +781,47 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
   scene.add(tree);
 
   // ---------- запад дальше: каменный цоколь, будка с X-дверью, балка в стикерах ----------
+  // ---------- лестница вниз в подвальный бар (за каменной стенкой, фото 1 слева) ----------
+  const S = STAIR, SD = 2.7, SW = S.x1 - S.x0, PH = 0.95;
+  const sLen = S.z1 - S.z0, sCz = (S.z0 + S.z1) / 2;
+  // каменная стенка-парапет со стороны клумбы и с севера, дальше вниз — стенки колодца
+  const parE = box(0.25, SD + PH, sLen + 0.25, slate, S.x1 + 0.125, (PH - SD) / 2, sCz - 0.125);
+  const parN = box(SW + 0.25, SD + PH, 0.25, slate, (S.x0 + S.x1 + 0.25) / 2, (PH - SD) / 2, S.z0 - 0.125);
+  const wallS = box(SW, SD, 0.2, slate, (S.x0 + S.x1) / 2, -SD / 2, S.z1 + 0.1);
+  const wallW = box(0.2, SD, sLen, slate, S.x0 - 0.1, -SD / 2, sCz);
+  [parE, parN, wallS, wallW].forEach((w) => { shadow(w); scene.add(w); });
+  scene.add(box(0.33, 0.05, sLen + 0.3, capM, S.x1 + 0.125, PH + 0.025, sCz - 0.125)); // доска поверху
+  // ступени: сверху у южного конца вниз к двери на севере
+  const stepM = mat({ color: '#7d7a74', roughness: 0.85 });
+  const rise = 0.19, run = 0.3, N = 13;
+  for (let i = 0; i < N; i++) {
+    const top = -(i + 1) * rise, z = S.z1 - run * (i + 0.5);
+    scene.add(box(SW, SD + top, run, stepM, (S.x0 + S.x1) / 2, (top - SD) / 2, z));
+  }
+  const landZ0 = S.z1 - run * N;
+  scene.add(box(SW, SD - N * rise, landZ0 - S.z0, stepM, (S.x0 + S.x1) / 2, (-N * rise - SD) / 2, (landZ0 + S.z0) / 2));
+  // дверь бара внизу и вывеска
+  const doorM = mat({ color: '#2a1810', roughness: 0.6 });
+  scene.add(box(0.95, 2.05, 0.06, doorM, (S.x0 + S.x1) / 2, -N * rise + 1.02, S.z0 + 0.03));
+  const [sc, sg] = T.canvas(256, 96);
+  sg.fillStyle = '#140c08'; sg.fillRect(0, 0, 256, 96);
+  sg.fillStyle = '#ffcf7a'; sg.font = 'bold 60px "Rubik Dirt", Impact, sans-serif'; sg.textAlign = 'center'; sg.textBaseline = 'middle'; sg.fillText('БАР', 128, 52);
+  const signTex = T.toTex(sc);
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.3), new THREE.MeshStandardMaterial({ map: signTex, emissiveMap: signTex, emissive: '#ffffff', emissiveIntensity: 2.2, roughness: 0.5 }));
+  sign.position.set((S.x0 + S.x1) / 2, -N * rise + 2.35, S.z0 + 0.07);
+  scene.add(sign);
+  // коричневая труба по каменной стенке (фото 1)
+  const px = S.x1 + 0.27;
+  const pipeM = mat({ color: '#5a3a28', roughness: 0.5 });
+  const pipeC = new THREE.CatmullRomCurve3([V3(px, 0.9, 1.6), V3(px, 0.72, 0.3), V3(px + 0.01, 0.62, -1.1), V3(px + 0.16, 0.5, -1.35), V3(px + 0.21, 0.05, -1.4)]);
+  scene.add(new THREE.Mesh(new THREE.TubeGeometry(pipeC, 30, 0.035, 8), pipeM));
+
+  // ---------- за лестницей: каменный цоколь и будка с X-распоркой, над лестницей — навес в стикерах ----------
   const PW = PLAT.x1 - PLAT.x0, PD = PLAT.z1 - PLAT.z0, PCz = (PLAT.z0 + PLAT.z1) / 2;
   const plat = box(PW, 1.05, PD, slate, (PLAT.x0 + PLAT.x1) / 2, 0.525, PCz);
   scene.add(plat);
   shadow(plat);
-  const px = PLAT.x1 + 0.04;
-  const pipeM = mat({ color: '#5a3a28', roughness: 0.5 });
-  const pipeC = new THREE.CatmullRomCurve3([V3(px, 0.98, 1.9), V3(px, 0.72, 0.4), V3(px + 0.01, 0.62, -0.2), V3(px + 0.16, 0.5, -0.45), V3(px + 0.21, 0.05, -0.5)]);
-  scene.add(new THREE.Mesh(new THREE.TubeGeometry(pipeC, 30, 0.035, 8), pipeM));
-  const bx0 = PLAT.x1 - 0.9; // стена будки стоит на цоколе, лицом к навесу
+  const bx0 = PLAT.x1 - 0.12; // стена будки стоит на цоколе, лицом к навесу
   const boothWood = mat({ map: T.toTex(T.woodCanvas({ w: 1024, h: 1024, base: '#8a6a44', dark: '#3a2814', light: '#b08a5a', planks: 9, seed: 71 }), { rot: Math.PI / 2, repeat: [1.5, 1] }), roughness: 0.75 });
   scene.add(box(0.1, 2.3, 4.2, boothWood, bx0, 1.05 + 1.15, -1.0));
   const xM = mat({ color: '#3a2a1a', roughness: 0.8 });
@@ -725,13 +831,17 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
     scene.add(d);
   }
   for (const z of [-3.1, 1.1]) scene.add(box(0.16, 2.4, 0.16, beam, bx0 + 0.05, 2.25, z));
-  // свес будки: балка и доски, обклеенные стикерами
+  // навес над лестницей: балка в стикерах на столбах у каменной стенки
   const stickerBeam = mat({ map: T.toTex(T.stickerPostCanvas(9), { rot: Math.PI / 2 }), roughness: 0.7 });
-  scene.add(box(0.2, 0.22, 4.6, stickerBeam, bx0 + 0.75, 3.4, -1.0));
-  const eave = box(1.2, 0.05, 4.8, beam, bx0 + 0.4, 3.55, -1.0);
-  eave.rotation.z = -0.12;
+  const cx = S.x1 + 0.1;
+  scene.add(box(0.2, 0.22, sLen + 0.6, stickerBeam, cx, 3.25, sCz));
+  for (const z of [S.z0 - 0.1, S.z1 - 0.1]) scene.add(box(0.13, 3.25 - PH, 0.13, beam, cx, (3.25 + PH) / 2, z));
+  const eave = box(bx0 - cx - 0.3, 0.05, sLen + 0.8, beam, (bx0 + cx) / 2, 3.45, sCz);
+  eave.rotation.z = 0.1;
   scene.add(eave);
-  scene.add(box(0.55, 2.4, 0.55, mat({ map: T.toTex(T.blockWallCanvas(8), { repeat: [0.4, 1] }), color: '#d8c3a0', roughness: 0.95 }), bx0 + 0.05, 2.25, 1.65));
+  scene.add(box(0.55, 2.4, 0.55, mat({ map: T.toTex(T.blockWallCanvas(8), { repeat: [0.4, 1] }), color: '#d8c3a0', roughness: 0.95 }), bx0 - 0.2, 2.25, 1.75));
+  // столбы для гирлянд во дворе
+  for (const [x, z] of [[0.9, FZ + 0.5], [3.6, FZ + 0.5], [5.15, FZ + 0.9]]) scene.add(box(0.07, 3.15, 0.07, dark, x, 1.575, z));
   // западная граница: высокая оштукатуренная стена
   const plaster = mat({ map: T.toTex(T.blockWallCanvas(8), { repeat: [3, 1] }), color: '#e9e0cf', roughness: 0.95 });
   scene.add(box(0.3, 3.8, 11, plaster, PLAT.x0 - 0.15, 1.9, -1.5));

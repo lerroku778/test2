@@ -12,15 +12,16 @@ export class Net {
   }
 
   // Одиночная игра: та же комната, но в браузере.
-  playLocal(nm, tod) {
+  playLocal(nm, { tod, tbl, wx, ch } = {}) {
     this.close();
     this.pid = 'me';
-    this.local = new Room('СОЛО', (pid, msg) => { if (pid === 'me') queueMicrotask(() => this.onMsg(msg)); }, tod);
+    this.local = new Room('СОЛО', (pid, msg) => { if (pid === 'me') queueMicrotask(() => this.onMsg(msg)); }, { tod, tbl, wx, bots: true });
     this.local.join('me', nm);
+    if (ch) this.local.handle('me', { t: 'char', k: ch });
     this.timer = setInterval(() => this.local && this.local.tick(Date.now()), 150);
   }
 
-  connect(nm, { create = false, code = '', tod = 'evening' } = {}) {
+  connect(nm, { create = false, code = '', tod = 'evening', tbl = 'center', wx = 'clear', ch = null } = {}) {
     this.close();
     const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
     return new Promise((resolve, reject) => {
@@ -29,7 +30,8 @@ export class Net {
       this.ws = ws;
       let opened = false;
       const to = setTimeout(() => { if (!opened) { ws.close(); reject(new Error('Сервер не отвечает')); } }, 7000);
-      ws.onopen = () => { opened = true; clearTimeout(to); ws.send(JSON.stringify({ t: 'hello', nm, create, code, tod })); };
+      ws.onopen = () => { opened = true; clearTimeout(to); ws.send(JSON.stringify({ t: 'hello', nm, create, code, tod, tbl, wx }));
+        if (ch) ws.send(JSON.stringify({ t: 'char', k: ch })); };
       ws.onmessage = (e) => {
         let m; try { m = JSON.parse(e.data); } catch { return; }
         if (m.t === 'joined') { this.pid = m.pid; this.code = m.code; resolve(m); }

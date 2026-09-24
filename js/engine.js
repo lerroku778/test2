@@ -13,7 +13,17 @@ export const CHARS = [
   { key: 'doll', name: 'Няшкакоджладка', tag: 'Рюши, бантики, холод' },
   { key: 'alien', name: 'Инопришленец юпитерский', tag: 'Прилетел за пивом' },
   { key: 'priest', name: 'Коджлад', tag: 'Всё видел, всё знает' },
+  { key: 'boss', name: 'Начальник', tag: 'Всё решено заранее' },
+  { key: 'shaggy', name: 'Патлатый', tag: 'Строит рожи' },
 ];
+export const CHAR_KEYS = CHARS.map((c) => c.key);
+export const charInfo = (k) => CHARS.find((c) => c.key === k) || CHARS[0];
+export const TABLE_SPOTS = ['center', 'counter', 'ropes'];
+export const WEATHERS = ['clear', 'rain'];
+const freeChar = (st, pref) => {
+  const used = new Set(st.seats.map((s) => s.ch).filter(Boolean));
+  return pref && CHAR_KEYS.includes(pref) && !used.has(pref) ? pref : CHAR_KEYS.find((k) => !used.has(k));
+};
 
 export const TODS = ['day', 'evening', 'night'];
 
@@ -30,14 +40,14 @@ export function shuffle(a) {
 }
 
 function emptySeat() {
-  return { pid: null, nm: '', bot: false, alive: true, hand: [], shots: 0, psn: 1, smk: 0 };
+  return { pid: null, nm: '', bot: false, alive: true, hand: [], shots: 0, psn: 1, smk: 0, ch: null, empty: false };
 }
 
 export function newLobby() {
   return {
     gid: rid(), seq: 1, ph: 'lobby', seats: [0, 1, 2, 3].map(emptySeat),
     round: 0, table: 'K', turn: -1, last: null, pile: 0, rev: null, dr: null,
-    win: -1, now: Date.now(), dl: 0, ev: null, people: [], tod: 'evening',
+    win: -1, now: Date.now(), dl: 0, ev: null, people: [], tod: 'evening', tbl: 'center', wx: 'clear',
   };
 }
 
@@ -58,13 +68,25 @@ function setPhase(st, ph) {
   st.dl = TIMES[ph] ? st.now + TIMES[ph] : 0;
 }
 
-export function sit(st, pid, nm, seat) {
+export function sit(st, pid, nm, seat, pref) {
   if (st.ph !== 'lobby' && st.ph !== 'over') return false;
   if (!(seat >= 0 && seat < 4)) return false;
   const s = st.seats[seat];
   if (s.pid && s.pid !== pid) return false;
+  const mine = st.seats.find((o) => o.pid === pid);
+  const keep = mine ? mine.ch : null;
   stand(st, pid);
   Object.assign(s, emptySeat(), { pid, nm, bot: false });
+  s.ch = freeChar(st, keep || pref);
+  return true;
+}
+
+// Сменить персонажа: каждый персонаж за столом только у одного игрока
+export function setChar(st, pid, k) {
+  if (st.ph !== 'lobby' && st.ph !== 'over') return false;
+  const s = st.seats.find((o) => o.pid === pid);
+  if (!s || !CHAR_KEYS.includes(k) || st.seats.some((o) => o !== s && o.ch === k)) return false;
+  s.ch = k;
   return true;
 }
 
@@ -74,12 +96,14 @@ export function stand(st, pid) {
   return true;
 }
 
-export function startGame(st) {
+// bots: одиночная игра добивает стол ботами; в мультиплеере играют только люди (от двух)
+export function startGame(st, bots = true) {
   if (st.ph !== 'lobby' && st.ph !== 'over') return false;
-  if (!st.seats.some((s) => s.pid)) return false;
-  st.seats.forEach((s, i) => {
-    if (!s.pid) { s.bot = true; s.nm = CHARS[i].name; } else s.bot = false;
-    s.alive = true; s.shots = 0; s.hand = []; s.smk = 0;
+  const humans = st.seats.filter((s) => s.pid).length;
+  if (humans < (bots ? 1 : 2)) return false;
+  st.seats.forEach((s) => {
+    if (!s.pid && bots) { s.bot = true; s.empty = false; s.ch = freeChar(st, s.ch); s.nm = charInfo(s.ch).name; } else if (!s.pid) { s.bot = false; s.empty = true; s.ch = null; s.nm = ''; } else { s.bot = false; s.empty = false; }
+    s.alive = !s.empty; s.shots = 0; s.hand = []; s.smk = 0;
     s.psn = 1 + Math.floor(Math.random() * SHOTS);
   });
   st.round = 0; st.win = -1; st.gid = rid();

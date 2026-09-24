@@ -29,7 +29,11 @@ export class Cards {
     // подсветка карт в руке: рамка за картой (выбрана — янтарная, под прицелом — светлая)
     this.glowGeo = new THREE.PlaneGeometry(CARD.w + 0.009, CARD.h + 0.009);
     this.glowSel = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.6, 1.55, 0.42), fog: false });
-    this.glowHov = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.95, 0.88, 0.74), fog: false });
+    // невидимые «мишени» для прицела: стоят там, где карта лежит в веере, и не двигаются
+    // вместе с поднятой картой — иначе на нижнем краю карта моргала туда-сюда
+    this.hitGeo = new THREE.PlaneGeometry(CARD.w, CARD.h + 0.04);
+    this.hitGeo.translate(0, 0.02, 0);
+    this.hitM = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
     this.pile = [];
     this.flights = [];
     this.fans = [];
@@ -70,17 +74,25 @@ export class Cards {
   }
 
   // Веер карт в руках персонажа (рубашкой к остальным)
-  attachFan(ch) {
-    const g = new THREE.Group();
-    g.position.set(0, 0.5, 0.36);
-    g.rotation.x = -0.45;
-    ch.torso.add(g);
-    this.fans[ch.seat] = { g, ch, cards: [] };
-    ch.fanGroup = g;
+  // веер места seat держит персонаж ch (персонажа на месте можно сменить в лобби)
+  attachFan(ch, seat = ch.seat) {
+    let f = this.fans[seat];
+    if (!f) {
+      const g = new THREE.Group();
+      g.position.set(0, 0.5, 0.36);
+      g.rotation.x = -0.45;
+      f = this.fans[seat] = { g, ch, cards: [] };
+    }
+    if (f.ch && f.ch !== ch && f.ch.fanGroup === f.g) { f.ch.fanGroup = null; f.ch.cards = 0; }
+    f.ch = ch;
+    ch.torso.add(f.g);
+    ch.fanGroup = f.g;
+    ch.fanSnap = true;
+    ch.cards = f.cards.length;
   }
 
   clearFan(f) {
-    while (f.cards.length) f.g.remove(f.cards.pop().pivot);
+    while (f.cards.length) { const o = f.cards.pop(); f.g.remove(o.pivot); if (o.hit) f.g.remove(o.hit); }
     if (f.mine) { f.mine = false; f.handKey = ''; f.g.rotation.set(-0.45, 0, 0); }
   }
 
@@ -93,7 +105,7 @@ export class Cards {
     while (f.cards.length < n) {
       const pivot = new THREE.Object3D();
       const c = this.make();
-      c.rotation.x = Math.PI / 2;
+      c.rotation.set(Math.PI / 2, Math.PI, 0); // поворот в плоскости карты: верх рисунка — вверх
       c.position.y = 0.05;
       pivot.add(c);
       f.g.add(pivot);
@@ -119,7 +131,7 @@ export class Cards {
     ranks.forEach((r, i) => {
       const pivot = new THREE.Object3D();
       const c = this.make(r);
-      c.rotation.x = Math.PI / 2;
+      c.rotation.set(Math.PI / 2, Math.PI, 0); // без этого корона и роза были вверх ногами
       c.position.y = 0.05;
       c.userData.handIdx = i;
       const glow = new THREE.Mesh(this.glowGeo, this.glowSel);
@@ -130,13 +142,19 @@ export class Cards {
       pivot.position.set((i - m) * 0.042, -Math.abs(i - m) * 0.004, -i * 0.0018);
       pivot.rotation.z = (i - m) * -0.11;
       f.g.add(pivot);
-      f.cards.push({ pivot, c, glow, hov: 0, sel: 0 });
+      const hit = new THREE.Mesh(this.hitGeo, this.hitM);
+      hit.position.copy(pivot.position);
+      hit.rotation.z = pivot.rotation.z;
+      hit.translateY(0.05);
+      hit.userData.handIdx = i;
+      f.g.add(hit);
+      f.cards.push({ pivot, c, glow, hit, hov: 0, sel: 0 });
     });
   }
 
   handMeshes(seat) {
     const f = this.fans[seat];
-    return f && f.mine ? f.cards.map((o) => o.c) : [];
+    return f && f.mine ? f.cards.map((o) => o.hit) : [];
   }
 
   // Раскладка своей руки: веер смотрит в глаза, карта под прицелом подрастает,
@@ -155,8 +173,7 @@ export class Cards {
       o.pivot.position.set(d * 0.042, -Math.abs(d) * 0.004 + o.sel * 0.034 + o.hov * 0.012, -i * 0.0018 - o.hov * 0.03 - o.sel * 0.006);
       o.pivot.rotation.z = d * -0.11 * (1 - o.hov * 0.5);
       o.pivot.scale.setScalar(1 + o.hov * 0.16);
-      o.glow.visible = o.sel > 0.5 || o.hov > 0.5;
-      o.glow.material = o.sel > 0.5 ? this.glowSel : this.glowHov;
+      o.glow.visible = o.sel > 0.5; // под прицелом карта только подрастает, без белой рамки
     });
     f.g.updateMatrixWorld(true);
   }
@@ -465,4 +482,70 @@ export function addButt(ashtray) {
   ashtray.add(g);
   ashtray.userData.butts.push(g);
   if (ashtray.userData.butts.length > 18) ashtray.remove(ashtray.userData.butts.shift());
+}
+
+// Дождь: отрезки-капли падают прямо в шейдере (ноль работы процессора), облако капель
+// ездит за камерой, под крышей навеса капли вырезаются.
+export class Rain {
+  constructor(scene, n = 6000) {
+    const pos = new Float32Array(n * 2 * 3), seed = new Float32Array(n * 2 * 3), tip = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random(), b = Math.random(), c = Math.random();
+      for (let k = 0; k < 2; k++) { const j = i * 2 + k; seed.set([a, b, c], j * 3); tip[j] = k; }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('seed', new THREE.BufferAttribute(seed, 3));
+    g.setAttribute('tip', new THREE.BufferAttribute(tip, 1));
+    this.uniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+      time: { value: 0 }, cam: { value: new THREE.Vector3() }, roof: { value: new THREE.Vector4(0, 0, 0, 0) },
+      roofY: { value: 3.45 }, color: { value: new THREE.Color('#aab4c2') }, opacity: { value: 0.32 },
+    }]);
+    this.mesh = new THREE.LineSegments(g, new THREE.ShaderMaterial({
+      uniforms: this.uniforms,
+      vertexShader: /* glsl */`
+        attribute vec3 seed; attribute float tip;
+        uniform float time, roofY; uniform vec3 cam; uniform vec4 roof;
+        varying float vA; varying float vRoof;
+        #include <common>
+        #include <fog_pars_vertex>
+        void main() {
+          const float W = 18.0, HH = 9.0;
+          vec3 p;
+          p.x = cam.x + (fract(seed.x - cam.x / W) - 0.5) * W;
+          p.z = cam.z + (fract(seed.y - cam.z / W) - 0.5) * W;
+          p.y = fract(seed.z - time * 0.95) * HH - 0.3;
+          p.x += p.y * 0.04 + tip * 0.012;
+          p.y -= tip * 0.3;
+          vRoof = (p.x > roof.x && p.x < roof.y && p.z > roof.z && p.z < roof.w && p.y < roofY) ? 1.0 : 0.0;
+          vA = (1.0 - tip * 0.75) * step(0.0, p.y);
+          vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: /* glsl */`
+        uniform vec3 color; uniform float opacity;
+        varying float vA; varying float vRoof;
+        #include <common>
+        #include <fog_pars_fragment>
+        void main() {
+          if (vRoof > 0.5 || vA <= 0.0) discard;
+          gl_FragColor = vec4(color, opacity * vA);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }`,
+      transparent: true, depthWrite: false, fog: true,
+    }));
+    this.mesh.frustumCulled = false;
+    this.mesh.visible = false;
+    scene.add(this.mesh);
+  }
+
+  update(time, camera, roof) {
+    if (!this.mesh.visible) return;
+    this.uniforms.time.value = time;
+    this.uniforms.cam.value.copy(camera.position);
+    if (roof) this.uniforms.roof.value.set(roof.x0, roof.x1, roof.z0, roof.z1);
+  }
 }

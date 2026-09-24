@@ -5,11 +5,14 @@ import * as E from './engine.js';
 const clean = (s, n = 16) => String(s ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, n);
 
 export class Room {
-  constructor(code, send, tod) {
+  constructor(code, send, { tod, tbl, wx, bots = false } = {}) {
     this.code = code;
     this.send = send; // (pid, msg) => void
+    this.bots = bots; // боты только в одиночной игре
     this.st = E.newLobby();
     if (E.TODS.includes(tod)) this.st.tod = tod;
+    if (E.TABLE_SPOTS.includes(tbl)) this.st.tbl = tbl;
+    if (E.WEATHERS.includes(wx)) this.st.wx = wx;
     this.people = new Map(); // pid -> { nm }
     this.botAt = 0;
     this.botSeq = -1;
@@ -45,12 +48,27 @@ export class Room {
         if (nm) { this.people.get(pid).nm = nm; if (seat >= 0 && (st.ph === 'lobby' || st.ph === 'over')) st.seats[seat].nm = nm; ok = true; }
         break;
       }
-      case 'sit': ok = E.sit(st, pid, this.people.get(pid).nm, m.seat | 0); break;
+      case 'sit': ok = E.sit(st, pid, this.people.get(pid).nm, m.seat | 0, this.people.get(pid).ch); break;
+      case 'char':
+        if (E.CHAR_KEYS.includes(m.k)) { this.people.get(pid).ch = m.k; ok = seat >= 0 ? E.setChar(st, pid, m.k) : true; }
+        break;
+      case 'wx':
+        if ((st.ph === 'lobby' || st.ph === 'over') && E.WEATHERS.includes(m.v)) { st.wx = m.v; ok = true; }
+        break;
+      case 'tbl':
+        if ((st.ph === 'lobby' || st.ph === 'over') && E.TABLE_SPOTS.includes(m.v)) { st.tbl = m.v; ok = true; }
+        break;
+      case 'look': // куда смотрит игрок — только пересылаем остальным, состояние не трогаем
+        if (seat >= 0 && Number.isFinite(m.y) && Number.isFinite(m.p)) {
+          const msg = { t: 'look', s: seat, y: Math.max(-2, Math.min(2, m.y)), p: Math.max(-1.5, Math.min(1.5, m.p)) };
+          for (const other of this.people.keys()) if (other !== pid) this.send(other, msg);
+        }
+        break;
       case 'stand': ok = E.stand(st, pid); break;
       case 'tod': // время суток меняется только до начала партии
         if ((st.ph === 'lobby' || st.ph === 'over') && E.TODS.includes(m.v)) { st.tod = m.v; ok = true; }
         break;
-      case 'start': ok = seat >= 0 && E.startGame(st); break;
+      case 'start': ok = seat >= 0 && E.startGame(st, this.bots); break;
       case 'again': if (st.ph === 'over') { E.backToLobby(st); ok = true; } break;
       case 'play': ok = seat >= 0 && Array.isArray(m.a) && E.play(st, seat, m.a.slice(0, 3).map((x) => x | 0)); break;
       case 'liar': ok = seat >= 0 && E.liar(st, seat); break;

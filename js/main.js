@@ -9,10 +9,10 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as T from './textures.js';
 import { buildWorld, TABLE_Y, TABLE_R } from './world.js';
 import { Character } from './characters.js';
-import { Cards, Particles, addButt, makeButt } from './fx.js';
+import { Cards, Particles, Rain, addButt, makeButt } from './fx.js';
 import { Audio } from './audio.js';
 import { Net } from './net.js';
-import { CHARS, RANK_TABLE, RANK_MANY, RANK_ONE, SHOTS, canCall } from './engine.js';
+import { CHARS, charInfo, RANK_TABLE, RANK_MANY, RANK_ONE, SHOTS, canCall } from './engine.js';
 
 const $ = (id) => document.getElementById(id);
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -58,7 +58,7 @@ grade.setSize(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getP
 // ---------- сцена ----------
 const audio = new Audio();
 const clock = new THREE.Clock();
-let world, chars = [], cards, particles;
+let world, chars = [], pool = [], cards, particles, rain;
 const cardImg = {};
 const portraits = [];
 
@@ -71,7 +71,7 @@ const G = {
   spectate: false, lastSmoke: 0, camMode: 'orbit', fade: 1, dealing: false,
   locked: false, zoom: false, aim: null, hover: -1, pendingPlay: null,
   sens: clamp(+store.get('sens', '1') || 1, 0.25, 3),
-  menuTod: store.get('tod', 'evening'), specSpot: 0,
+  menuTod: store.get('tod', 'evening'), menuTbl: store.get('tbl', 'center'), menuWx: store.get('wx', 'clear'), myChar: store.get('char', ''), specSpot: 0,
 };
 if (isMobile) document.body.classList.add('touch');
 
@@ -98,19 +98,26 @@ async function boot() {
   world = buildWorld(scene);
   world.lights.sun.shadow.mapSize.set(Q.shadow, Q.shadow);
   world.setTime(G.menuTod);
+  world.setLayout(G.menuTbl);
   syncTodButtons(G.menuTod);
+  syncTblButtons(G.menuTbl);
+  rain = new Rain(scene);
+  grade.hide.push(rain.mesh);
+  applyWeather(G.menuWx);
   setP(45, 'Рассаживаем гостей…');
   await nextFrame();
   particles = new Particles(scene);
   grade.hide.push(particles.smokeGroup);
+  grade.soft.push(particles.smokeGroup);
   cards = new Cards(scene);
-  for (let i = 0; i < 4; i++) {
-    const ch = new Character(CHARS[i].key, i, particles);
+  // все персонажи строятся заранее; за столом те, кого выбрали игроки
+  CHARS.forEach((c, k) => {
+    const ch = new Character(c.key, k % 4, particles);
     scene.add(ch.root);
     scene.add(ch.cig);
-    cards.attachFan(ch);
-    chars.push(ch);
-  }
+    pool.push(ch);
+  });
+  for (let i = 0; i < 4; i++) { chars.push(pool[i]); cards.attachFan(pool[i], i); }
   particles.onSplat = (() => { let last = 0; return () => { const t = performance.now(); if (t - last > 90) { last = t; audio.splat(); } }; })();
   for (const k of ['K', 'Q', 'A', 'J', 'back']) cardImg[k] = cards.canvases[k].toDataURL('image/png');
   $('packImg').src = T.packCanvas().toDataURL('image/jpeg', 0.85);
@@ -125,16 +132,17 @@ async function boot() {
   warm.position.set(0, TABLE_Y + 0.05, 0);
   scene.add(warm);
   const glowW = new THREE.Mesh(cards.glowGeo, cards.glowSel); warm.add(glowW);
-  chars.forEach((c) => { c.cig.visible = true; });
+  pool.forEach((c) => { c.cig.visible = true; c.root.visible = true; });
   particles.smoke(V(0, TABLE_Y + 0.3, 0), V(), 0.01, 0.05, 0);
   particles.update(0.001);
   renderer.compile(scene, camera);
   composer.render(0.016);
   scene.remove(warm);
-  chars.forEach((c) => { c.cig.visible = false; });
+  pool.forEach((c) => { c.cig.visible = false; });
   setP(88, 'Зажигаем гирлянды…');
   await nextFrame();
   renderPortraits();
+  assignChars(null);
   setP(100, 'Готово');
   await nextFrame();
   $('loader').style.opacity = '0';
@@ -152,8 +160,11 @@ function renderPortraits() {
   out.width = w * 2; out.height = h * 2;
   const g = out.getContext('2d');
   renderer.setScissorTest(true);
-  for (let i = 0; i < 4; i++) {
-    const ch = chars[i];
+  for (let i = 0; i < pool.length; i++) {
+    const ch = pool[i];
+    // портрет каждого персонажа снимаем на месте 0, остальных на это время прячем
+    pool.forEach((o) => { o.root.visible = o === ch; });
+    ch.setSeat(0);
     pc.position.copy(ch.root.localToWorld(V(0.02, 1.22, 0.95)));
     pc.lookAt(ch.root.localToWorld(V(0, 1.12, 0)));
     renderer.setViewport(0, 0, w, h);
@@ -161,8 +172,9 @@ function renderPortraits() {
     renderer.render(scene, pc);
     g.clearRect(0, 0, out.width, out.height);
     g.drawImage(canvas, 0, canvas.height - h * pr, w * pr, h * pr, 0, 0, out.width, out.height);
-    portraits[i] = out.toDataURL('image/jpeg', 0.88);
+    portraits[ch.key] = out.toDataURL('image/jpeg', 0.88);
   }
+  pool.forEach((o, k) => { if (k < 4) o.setSeat(k); });
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, innerWidth, innerHeight);
 }
@@ -230,16 +242,38 @@ function stamp(big, small = '', cls = '', ms = 1700) {
 
 function feed(text) {
   const f = $('feed');
+  if (!f) return; // ленты действий больше нет: всё видно по штампам и статусу
   const d = document.createElement('div');
   d.textContent = text;
   f.prepend(d);
   while (f.children.length > 5) f.lastChild.remove();
 }
 
-const nm = (i) => (G.st && G.st.seats[i] ? (i === G.mySeat ? 'Ты' : G.st.seats[i].nm || CHARS[i].name) : CHARS[i].name);
+const seatChar = (i) => charInfo(G.st && G.st.seats[i] && G.st.seats[i].ch);
+const nm = (i) => (i === G.mySeat ? 'Ты' : nmFull(i));
 const who = (i) => (i === G.mySeat ? 'Ты' : nmFull(i));
 const say = (i, you, verb) => (i === G.mySeat ? you : `${nmFull(i)} ${verb}`);
-const nmFull = (i) => (G.st && G.st.seats[i] ? G.st.seats[i].nm || CHARS[i].name : CHARS[i].name);
+const nmFull = (i) => (G.st && G.st.seats[i] && G.st.seats[i].nm) || seatChar(i).name;
+const occupied = (s) => !!(s && (s.pid || s.bot));
+
+// Кто где сидит: у каждого места свой выбранный персонаж, пустые места без никого.
+function assignChars(st) {
+  const want = st ? st.seats.map((s) => (occupied(s) ? s.ch || null : null)) : CHARS.slice(0, 4).map((c) => c.key);
+  const next = [null, null, null, null];
+  const used = new Set();
+  want.forEach((k, i) => { const c = k && pool.find((p) => p.key === k); if (c && !used.has(c)) { next[i] = c; used.add(c); } });
+  next.forEach((c, i) => { if (!c) { next[i] = pool.find((p) => !used.has(p)); used.add(next[i]); } });
+  pool.forEach((c) => { if (!next.includes(c)) { c.root.visible = false; c.cig.visible = false; c.smoking = null; c.isMe = false; c.fp = null; c.hideHead(false); } });
+  next.forEach((c, i) => {
+    if (chars[i] !== c || c.seat !== i || c.fanGroup !== (cards.fans[i] && cards.fans[i].g)) {
+      c.setSeat(i); cards.attachFan(c, i); c.action = null; c.smoking = null; c.cig.visible = false; c.setDead(false, true);
+    }
+    const occ = !!want[i] && (!st || occupied(st.seats[i]));
+    c.root.visible = occ;
+    world.bottles[i].group.visible = occ;
+  });
+  chars.splice(0, 4, ...next);
+}
 
 // ---------- меню ----------
 function myName() {
@@ -256,7 +290,7 @@ async function goOnline(create) {
   const btn = create ? $('createBtn') : $('joinBtn');
   btn.disabled = true;
   try {
-    const m = await net.connect(myName(), { create, code, tod: G.menuTod });
+    const m = await net.connect(myName(), { create, code, tod: G.menuTod, tbl: G.menuTbl, wx: G.menuWx, ch: G.myChar });
     G.pid = m.pid; G.code = m.code; G.solo = false;
     history.replaceState(null, '', `${location.pathname}?room=${m.code}`);
   } catch (e) {
@@ -267,7 +301,7 @@ async function goOnline(create) {
 function goSolo() {
   audio.init();
   G.pid = 'me'; G.code = 'СОЛО'; G.solo = true;
-  net.playLocal(myName(), G.menuTod);
+  net.playLocal(myName(), { tod: G.menuTod, tbl: G.menuTbl, wx: G.menuWx, ch: G.myChar });
 }
 
 function leave() {
@@ -278,7 +312,12 @@ function leave() {
   resetVisuals(true);
   history.replaceState(null, '', location.pathname);
   world.setTime(G.menuTod);
+  world.setLayout(G.menuTbl);
   syncTodButtons(G.menuTod);
+  syncTblButtons(G.menuTbl);
+  applyWeather(G.menuWx);
+  G.spkSet = false;
+  assignChars(null);
   showScreen('menu');
 }
 
@@ -287,6 +326,7 @@ function onMsg(m) {
   if (m.t === 'st') onState(m.st);
   else if (m.t === 'closed') { if (G.screen !== 'menu') { toast('Связь с сервером потеряна'); leave(); } }
   else if (m.t === 'err') $('menuErr').textContent = m.e;
+  else if (m.t === 'look' && chars[m.s] && m.s !== G.mySeat) chars[m.s].netLook = { yaw: m.y, pitch: m.p, t: performance.now() };
 }
 
 function onState(st) {
@@ -295,6 +335,9 @@ function onState(st) {
   G.recvAt = Date.now();
   G.mySeat = st.seats.findIndex((s) => s.pid === G.pid);
   if (st.tod && st.tod !== world.tod) { world.setTime(st.tod); syncTodButtons(st.tod); }
+  if (st.tbl && st.tbl !== world.layout) { world.setLayout(st.tbl); syncTblButtons(st.tbl); G.spkSet = false; }
+  if ((st.wx || 'clear') !== world.wx) applyWeather(st.wx || 'clear');
+  assignChars(st);
   const inGame = st.ph !== 'lobby';
   const fresh = !prev || prev.gid !== st.gid;
 
@@ -521,15 +564,14 @@ function renderLobby() {
   const st = G.st;
   $('roomCode').textContent = G.code;
   $('copyBtn').classList.toggle('hidden', G.solo);
-  const box = $('chars');
-  if (!box.children.length) {
-    CHARS.forEach((c, i) => {
+  // места
+  const seats = $('seats');
+  if (!seats.children.length) {
+    for (let i = 0; i < 4; i++) {
       const b = document.createElement('button');
       b.className = 'char';
-      b.innerHTML = '<img alt=""><div class="info"><div class="nm"></div><div class="tg"></div><div class="who"></div></div>';
-      b.querySelector('img').src = portraits[i] || '';
-      b.querySelector('.nm').textContent = c.name;
-      b.querySelector('.tg').textContent = c.tag;
+      b.innerHTML = '<img alt=""><span class="seatno"></span><div class="info"><div class="nm"></div><div class="who"></div></div>';
+      b.querySelector('.seatno').textContent = `Место ${i + 1}`;
       b.addEventListener('click', () => {
         audio.init(); audio.select();
         const s = G.st && G.st.seats[i];
@@ -538,21 +580,61 @@ function renderLobby() {
         else if (!s.pid) net.send({ t: 'sit', seat: i });
         else toast('Место занято');
       });
+      seats.appendChild(b);
+    }
+  }
+  [...seats.children].forEach((b, i) => {
+    const s = st.seats[i];
+    const mine = s.pid === G.pid;
+    b.classList.toggle('mine', mine);
+    b.classList.toggle('taken', !!s.pid && !mine);
+    b.classList.toggle('empty', !s.pid);
+    const img = b.querySelector('img');
+    const src = portraits[s.pid ? s.ch : ''] || portraits[CHARS[i].key] || '';
+    if (img.getAttribute('src') !== src) img.src = src;
+    b.querySelector('.nm').textContent = s.pid ? charInfo(s.ch).name : 'Свободно';
+    b.querySelector('.who').textContent = mine ? 'Ты здесь · кликни, чтобы встать' : s.pid ? s.nm : G.solo ? 'Сядет бот' : 'Никого';
+  });
+  // персонажи
+  const box = $('chars');
+  if (!box.children.length) {
+    CHARS.forEach((c) => {
+      const b = document.createElement('button');
+      b.className = 'char';
+      b.innerHTML = '<img alt=""><div class="info"><div class="nm"></div><div class="tg"></div><div class="who"></div></div>';
+      b.querySelector('img').src = portraits[c.key] || '';
+      b.querySelector('.nm').textContent = c.name;
+      b.querySelector('.tg').textContent = c.tag;
+      b.addEventListener('click', () => {
+        audio.init(); audio.select();
+        const owner = G.st && G.st.seats.find((s) => s.ch === c.key && s.pid);
+        if (owner && owner.pid !== G.pid) { toast(`${c.name} уже за столом у игрока ${owner.nm}`); return; }
+        G.myChar = c.key; store.set('char', c.key);
+        net.send({ t: 'char', k: c.key });
+        renderLobby();
+      });
       box.appendChild(b);
     });
   }
-  [...box.children].forEach((b, i) => {
-    const s = st.seats[i];
-    b.classList.toggle('mine', s.pid === G.pid);
-    b.classList.toggle('taken', !!s.pid);
-    b.querySelector('.who').textContent = s.pid === G.pid ? 'Ты за этим местом' : s.pid ? s.nm : 'Свободно';
+  const mySeat = G.mySeat >= 0 ? st.seats[G.mySeat] : null;
+  const myKey = mySeat ? mySeat.ch : G.myChar;
+  [...box.children].forEach((b, k) => {
+    const c = CHARS[k];
+    const owner = st.seats.find((s) => s.ch === c.key && s.pid);
+    const mine = myKey === c.key && (!owner || owner.pid === G.pid);
+    b.classList.toggle('mine', mine);
+    b.classList.toggle('taken', !!owner && owner.pid !== G.pid);
+    b.querySelector('.who').textContent = mine ? 'Твой' : owner ? owner.nm : '';
   });
   const pp = $('people');
   pp.innerHTML = '';
   const lab = document.createElement('span'); lab.textContent = G.solo ? 'Одиночная игра' : 'В комнате:'; pp.appendChild(lab);
   if (!G.solo) (st.people || []).forEach((p) => { const c = document.createElement('span'); c.className = 'chip' + (p.pid === G.pid ? ' me' : ''); c.textContent = p.nm; pp.appendChild(c); });
-  $('startBtn').disabled = G.mySeat < 0;
-  $('startBtn').textContent = G.mySeat < 0 ? 'Сначала сядь за стол' : 'Начать партию';
+  const humans = st.seats.filter((s) => s.pid).length;
+  $('lobbyHint').textContent = G.solo ? 'Свободные места займут боты. Персонажа можно поменять в любой момент до начала.' : 'Играют только люди, без ботов: пустые места так и останутся пустыми. Нужно хотя бы двое за столом.';
+  const need = !G.solo && humans < 2;
+  $('startBtn').disabled = G.mySeat < 0 || need;
+  $('startBtn').textContent = G.mySeat < 0 ? 'Сначала сядь за стол' : need ? 'Ждём второго игрока' : 'Начать партию';
 }
 
 // ---------- HUD ----------
@@ -578,7 +660,8 @@ function renderHud() {
       box.appendChild(el); plateEls[i] = el;
     }
     const n = el.querySelector('.nm');
-    n.textContent = s.nm || CHARS[i].name;
+    n.textContent = s.nm || seatChar(i).name;
+    el.dataset.gone = occupied(s) ? '' : '1';
     if (s.bot) { const b = document.createElement('span'); b.className = 'bot'; b.textContent = 'БОТ'; n.appendChild(b); }
     el.classList.toggle('turn', st.ph === 'turn' && st.turn === i);
     el.classList.toggle('dead', G.visualDead[i]);
@@ -593,7 +676,7 @@ function renderHud() {
   if (G.mySeat >= 0) {
     mp.classList.remove('hidden');
     mp.innerHTML = '';
-    const a = document.createElement('div'); a.className = 'nm'; a.textContent = CHARS[G.mySeat].name; mp.appendChild(a);
+    const a = document.createElement('div'); a.className = 'nm'; a.textContent = seatChar(G.mySeat).name; mp.appendChild(a);
     const l = document.createElement('div'); l.className = 'label'; l.textContent = 'Глотков выпито'; mp.appendChild(l);
     const p = document.createElement('div'); p.className = 'pips'; p.innerHTML = pipsHtml(G.mySeat); mp.appendChild(p);
     const r = document.createElement('div'); r.className = 'risk';
@@ -715,7 +798,7 @@ function updatePlates() {
   plateEls.forEach((el, i) => {
     if (!el) return;
     const p = chars[i].head.localToWorld(tmpV.set(0, 0.42, 0)).project(camera);
-    const vis = el.dataset.me !== '1' && p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2;
+    const vis = el.dataset.me !== '1' && el.dataset.gone !== '1' && p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2;
     const op = vis ? '1' : '0';
     if (el._op !== op) { el._op = op; el.style.opacity = op; }
     if (!vis) return;
@@ -753,6 +836,7 @@ let idleLookAt = 0;
 function stepChars(dt, time) {
   for (let i = 0; i < 4; i++) {
     const ch = chars[i];
+    if (!ch.root.visible) continue; // пустое место
     ch.update(dt, time, {
       bottle: world.bottles[i],
       vomit: (p, d, ddt) => particles.vomit(p, d, ddt),
@@ -854,6 +938,7 @@ function loop() {
   stepChars(dt, time);
   cards.update(dt);
   particles.update(dt);
+  rain.update(time, camera, world.roofRect());
 
   // камера
   const zoomK = 1 - Math.pow(0.000001, dt);
@@ -871,8 +956,8 @@ function loop() {
     // ЛКМ / Пробел — перейти на соседнюю точку
     if (snap) { G.specSpot = 0; G.look = { ...LOOK0 }; }
     const a = (G.mySeat >= 0 ? G.mySeat : 0) * Math.PI / 2 + Math.PI / 4 + G.specSpot * Math.PI / 2;
-    camera.position.set(Math.sin(a) * 2.0, 1.72, Math.cos(a) * 2.0);
-    const basePitch = -Math.atan2(1.72 - TABLE_Y - 0.1, 2.0);
+    camera.position.set(Math.sin(a) * 1.75, 1.72, Math.cos(a) * 1.75);
+    const basePitch = -Math.atan2(1.72 - TABLE_Y - 0.1, 1.75);
     tmpE.set(clamp(basePitch - (G.look.pitch - LOOK0.pitch), -1.3, 1.0), a + G.look.yaw, 0);
     camera.quaternion.setFromEuler(tmpE);
     camera.fov = 60;
@@ -881,8 +966,9 @@ function loop() {
     // меню и лобби: вид со двора на навес (катушки за спиной, дерево слева)
     const p = tmpV.set(0.2 + Math.sin(t * 0.09) * 0.45, 1.6 + Math.sin(t * 0.13) * 0.08, -4.7 + Math.sin(t * 0.07) * 0.25);
     if (G.screen === 'lobby') p.set(2.3 + Math.sin(t * 0.1) * 0.3, 1.8, -3.3 + Math.sin(t * 0.08) * 0.2);
+    p.add(world.env.position); // точка съёмки привязана к навесу, где бы ни стоял игровой стол
     camera.position.lerp(p, snap ? 1 : Math.min(1, dt * 0.8)); // медленный облёт меню — это съёмка, а не управление
-    const look = G.screen === 'lobby' ? V(0.1, 1.0, 0.1) : V(0.9, 1.05, 0.4);
+    const look = G.screen === 'lobby' ? V(0.1, 1.0, 0.1) : V(0.9, 1.05, 0.4).add(world.env.position);
     look.x -= (G.mouse.x - 0.5) * 1.2; look.y -= (G.mouse.y - 0.5) * 0.6;
     tmpM.lookAt(camera.position, look, UPV);
     camera.quaternion.setFromRotationMatrix(tmpM);
@@ -894,6 +980,15 @@ function loop() {
   }
   camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
+
+  // куда смотрю — остальным игрокам (не чаще ~8 раз в секунду и только если голова повернулась)
+  if (net.online && G.camMode === 'fp' && G.screen === 'hud' && time - (G.lookSentAt || 0) > 0.12) {
+    const y = +G.look.yaw.toFixed(3), p = +G.look.pitch.toFixed(3);
+    if (Math.abs(y - (G.lookY ?? 99)) > 0.015 || Math.abs(p - (G.lookP ?? 99)) > 0.015 || time - G.lookSentAt > 2) {
+      net.send({ t: 'look', y, p });
+      G.lookY = y; G.lookP = p; G.lookSentAt = time;
+    }
+  }
 
   // карты в руке и то, на что смотрит прицел
   const fpPlay = G.camMode === 'fp' && G.screen === 'hud' && G.mySeat >= 0;
@@ -991,6 +1086,43 @@ canvas.addEventListener('pointercancel', () => { touch = null; });
 function nextSpot() { G.specSpot = (G.specSpot + 1) % 4; G.look = { ...LOOK0 }; }
 
 // время суток: в меню выбирается для новой комнаты, в лобби — для текущей
+// погода: ясно или дождь (капли, пасмурное небо, мокрая брусчатка, шум)
+function applyWeather(wx) {
+  world.setWeather(wx);
+  rain.mesh.visible = world.wx === 'rain';
+  audio.setRain(world.wx === 'rain');
+  for (const id of ['wxMenu', 'wxLobby']) [...$(id).children].forEach((b) => b.classList.toggle('on', b.dataset.wx === world.wx));
+}
+$('wxMenu').addEventListener('click', (e) => {
+  const wx = e.target.dataset && e.target.dataset.wx;
+  if (!wx) return;
+  G.menuWx = wx; store.set('wx', wx);
+  if (world) applyWeather(wx);
+});
+$('wxLobby').addEventListener('click', (e) => {
+  const wx = e.target.dataset && e.target.dataset.wx;
+  if (!wx) return;
+  G.menuWx = wx; store.set('wx', wx);
+  net.send({ t: 'wx', v: wx });
+});
+
+function syncTblButtons(tbl) {
+  for (const id of ['tblMenu', 'tblLobby']) [...$(id).children].forEach((b) => b.classList.toggle('on', b.dataset.tbl === tbl));
+}
+$('tblMenu').addEventListener('click', (e) => {
+  const tbl = e.target.dataset && e.target.dataset.tbl;
+  if (!tbl) return;
+  G.menuTbl = tbl; store.set('tbl', tbl);
+  if (world) { world.setLayout(tbl); G.spkSet = false; }
+  syncTblButtons(tbl);
+});
+$('tblLobby').addEventListener('click', (e) => {
+  const tbl = e.target.dataset && e.target.dataset.tbl;
+  if (!tbl) return;
+  G.menuTbl = tbl; store.set('tbl', tbl);
+  net.send({ t: 'tbl', v: tbl });
+});
+
 function syncTodButtons(tod) {
   for (const id of ['todMenu', 'todLobby']) [...$(id).children].forEach((b) => b.classList.toggle('on', b.dataset.tod === tod));
 }
