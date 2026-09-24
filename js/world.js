@@ -12,10 +12,9 @@ export const SEAT_R = 1.04;
 export const GZ = { x0: -1.5, x1: 5.0, zN: -1.9, zS: 2.15 };
 // вход во двор — калитка в дальнем левом (северо-западном) углу; каменный цоколь с будкой — слева
 // Размеры сняты с фото 1: калитка ≈ в 6,5–7 м от глаз игрока (≈3,5 м за столбом),
-// перед ней подъём на две ступеньки; слева за каменной стенкой — лестница вниз в бар.
+// слева за каменной стенкой — лестница вниз в бар.
 const GATE = { x0: -2.65, x1: -1.8 };
 const FENCE_Z = -5.6;
-const TERRACE = { x0: -3.75, x1: -0.9, z0: -4.1, step: 0.16 };
 const STAIR = { x0: -5.3, x1: -3.9, z0: -3.4, z1: 1.9 }; // проём лестницы в подвал
 const PLAT = { x0: -7.0, x1: -5.3, z0: -3.7, z1: 2.4 }; // цоколь будки за лестницей
 // Где стоит игровой стол (в координатах навеса) и какие столики стоят вокруг
@@ -663,18 +662,10 @@ function buildYard(scene, W, { slate, woodDark, beam, dark, blockWall }) {
   // ---------- вход: серая калитка в дальнем левом углу двора, рыжий забор уходит от неё к будке ----------
   const gateM = mat({ color: '#6c7076', roughness: 0.55, metalness: 0.35 });
   const gw = GATE.x1 - GATE.x0;
-  const ty = TERRACE.step * 2; // калитка стоит на площадке, к ней подъём на две ступеньки
+  const ty = 0; // калитка стоит прямо на брусчатке
   for (let x = GATE.x0; x < GATE.x1 - 0.05; x += 0.1) scene.add(box(0.08, 2.1, 0.03, gateM, x + 0.05, ty + 1.05, FZ));
   scene.add(box(gw, 0.06, 0.05, gateM, (GATE.x0 + GATE.x1) / 2, ty + 0.3, FZ + 0.03), box(gw, 0.06, 0.05, gateM, (GATE.x0 + GATE.x1) / 2, ty + 1.9, FZ + 0.03));
   for (const x of [GATE.x0, GATE.x1]) scene.add(box(0.1, 2.25, 0.1, gateM, x, ty + 1.12, FZ + 0.04));
-  // площадка у калитки и ступеньки к ней (светлый бетон): спереди и справа
-  const concM = mat({ color: '#b9b4aa', roughness: 0.9 });
-  const T0 = TERRACE, sw = 0.32;
-  const up = box(T0.x1 - T0.x0, ty, T0.z0 - FZ, concM, (T0.x0 + T0.x1) / 2, ty / 2, (T0.z0 + FZ) / 2);
-  const st1 = box(T0.x1 - T0.x0 + sw, T0.step, sw, concM, (T0.x0 + T0.x1 + sw) / 2, T0.step / 2, T0.z0 + sw / 2);
-  const st2 = box(sw, T0.step, T0.z0 - FZ, concM, T0.x1 + sw / 2, T0.step / 2, (T0.z0 + FZ) / 2);
-  shadow(up); shadow(st1); shadow(st2);
-  scene.add(up, st1, st2);
   // рыжий забор: из угла у калитки по диагонали к каменному цоколю будки (за деревом)
   const redM = mat({ map: T.toTex(T.woodCanvas({ w: 512, h: 512, base: '#7a3e2a', dark: '#3a1a10', light: '#a5623f', planks: 1, gaps: false, seed: 63 })), roughness: 0.8 });
   const ra = V3(GATE.x0, 0, FZ), rb = V3(STAIR.x1 + 0.25, 0, STAIR.z0 - 0.25); // до угла каменной стенки лестницы
