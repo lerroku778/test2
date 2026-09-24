@@ -72,7 +72,7 @@ const G = {
   st: null, pid: null, mySeat: -1, code: '', solo: false, recvAt: 0,
   screen: 'loading', timers: [], sel: new Set(), handKey: '',
   visualShots: [0, 0, 0, 0], visualDead: [false, false, false, false],
-  look: { ...LOOK0 }, mouse: { x: 0.5, y: 0.5 }, shake: 0, flash: 0, poison: 0, drunk: 0,
+  look: { ...LOOK0 }, mouse: { x: 0.5, y: 0.5 }, shake: 0, flash: 0, poison: 0, drunk: 0, sway: 0, drunkOn: store.get('drunk', '1') !== '0',
   spectate: false, lastSmoke: 0, camMode: 'orbit', fade: 1, dealing: false,
   locked: false, zoom: false, aim: null, hover: -1, pendingPlay: null,
   sens: clamp(+store.get('sens', '1') || 1, 0.25, 3),
@@ -869,8 +869,11 @@ const CENTER = new THREE.Vector2(0, 0);
 const tablePlane = new THREE.Plane(V(0, 1, 0), -TABLE_Y);
 const YAW_MAX = 1.9, PITCH_MIN = -0.95, PITCH_MAX = 1.25;
 let idleLookAt = 0;
-// сила опьянения по числу выпитых глотков: сначала чуть-чуть, к пятому — сильно
-const DRUNK = [0, 0.14, 0.3, 0.5, 0.74, 1];
+// Опьянение по числу выпитых глотков. Двоение (DRUNK) — с первого глотка сразу заметное;
+// волны и покачивание (SWAY) — со второго и сразу в полную «рабочую» силу: слабое медленное
+// покачивание укачивает сильнее, чем явное. Дальше каждый глоток — стадия сильнее.
+const DRUNK = [0, 0.5, 0.5, 0.72, 0.94, 1.15];
+const SWAY = [0, 0, 0.5, 0.72, 0.94, 1.15];
 // лимит кадров: 0 — без лимита (по умолчанию), иначе 1…1000 в секунду
 let fpsCap = clamp(Math.round(+store.get('fps', '0') || 0), 0, 1000);
 let frameDue = 0;
@@ -996,9 +999,9 @@ function loop(now) {
     me.head.localToWorld(camera.position.set(0, me.headC.y + 0.03, me.headC.z + 0.075));
     tmpE.set(me.s.pitch + me.s.lean * 0.35, me.s.yaw, me.s.roll);
     camera.quaternion.copy(me.root.quaternion).multiply(tmpQ.setFromEuler(tmpE)).multiply(flipY);
-    if (G.drunk > 0.001) {
+    if (G.sway > 0.001) {
       // пьяного покачивает: голова плавно гуляет и заваливается набок
-      const d = G.drunk;
+      const d = G.sway;
       tmpE.set(Math.sin(time * 0.53) * 0.025 * d, Math.sin(time * 0.37 + 1.3) * 0.035 * d, Math.sin(time * 0.61 + 0.4) * 0.06 * d);
       camera.quaternion.multiply(tmpQ.setFromEuler(tmpE));
     }
@@ -1064,13 +1067,17 @@ function loop(now) {
   G.poison = Math.max(0, G.poison - dt * 0.08);
   // опьянение: после каждого пережитого глотка сильнее; плавно нарастает, пока пьёшь.
   // Выбыл (наблюдаешь) или партия ещё не идёт — трезвый взгляд.
-  const shots = G.mySeat >= 0 && G.screen === 'hud' && !G.spectate ? G.visualShots[G.mySeat] : 0;
-  const drunkT = DRUNK[Math.min(shots, DRUNK.length - 1)];
-  G.drunk += (drunkT - G.drunk) * Math.min(1, dt * (drunkT > G.drunk ? 0.6 : 2));
+  // Выключено в настройках — не пьянеешь вовсе.
+  const shots = G.drunkOn && G.mySeat >= 0 && G.screen === 'hud' && !G.spectate ? G.visualShots[G.mySeat] : 0;
+  const lvl = Math.min(shots, DRUNK.length - 1);
+  G.drunk += (DRUNK[lvl] - G.drunk) * Math.min(1, dt * (DRUNK[lvl] > G.drunk ? 0.8 : 2));
+  // покачивание нарастает быстро — не задерживаемся в слабой (укачивающей) фазе
+  G.sway += (SWAY[lvl] - G.sway) * Math.min(1, dt * 2);
   G.fade = Math.max(0, G.fade - Math.min(0.2, realDt) * 0.9);
   grade.uniforms.time.value = time;
   grade.uniforms.poison.value = G.poison;
   grade.uniforms.drunk.value = G.drunk;
+  grade.uniforms.sway.value = G.sway;
   grade.uniforms.flash.value = G.flash;
   grade.uniforms.fade.value = G.fade;
 
@@ -1301,6 +1308,15 @@ $('pExit').addEventListener('click', leave);
 const showSens = () => { $('sensIn').value = G.sens; $('sensVal').textContent = G.sens.toFixed(2); };
 showSens();
 $('sensIn').addEventListener('input', () => { G.sens = clamp(+$('sensIn').value || 1, 0.25, 3); store.set('sens', G.sens); showSens(); });
+// громкость музыки из колонки (0…150 %) и переключатель опьянения
+audio.spkVol = clamp(+store.get('spkVol', '1'), 0, 1.5);
+if (!Number.isFinite(audio.spkVol)) audio.spkVol = 1;
+const showSpk = () => { $('spkIn').value = audio.spkVol; $('spkVal').textContent = `${Math.round(audio.spkVol * 100)}%`; };
+showSpk();
+$('spkIn').addEventListener('input', () => { audio.setSpeakerVol(clamp(+$('spkIn').value, 0, 1.5)); store.set('spkVol', audio.spkVol); showSpk(); });
+const showDrunk = () => { $('pDrunk').textContent = `Опьянение: ${G.drunkOn ? 'вкл' : 'выкл'}`; };
+showDrunk();
+$('pDrunk').addEventListener('click', () => { G.drunkOn = !G.drunkOn; store.set('drunk', G.drunkOn ? '1' : '0'); showDrunk(); });
 // лимит FPS: одно значение на меню и паузу, пусто или 0 — без лимита
 const fpsIns = [...document.querySelectorAll('.fpsIn')];
 const showFps = () => fpsIns.forEach((el) => { if (document.activeElement !== el) el.value = fpsCap ? String(fpsCap) : ''; });

@@ -24,7 +24,7 @@ export class StylePass extends Pass {
     this.uniforms = {
       tDiffuse: { value: null }, tNormal: { value: this.nrt.texture }, tDepth: { value: this.nrt.depthTexture }, tSmoke: { value: this.srt.texture }, useSmoke: { value: 0 },
       res: { value: new THREE.Vector2(1, 1) }, near: { value: camera.near }, far: { value: camera.far },
-      time: { value: 0 }, poison: { value: 0 }, drunk: { value: 0 }, flash: { value: 0 }, fade: { value: 0 },
+      time: { value: 0 }, poison: { value: 0 }, drunk: { value: 0 }, sway: { value: 0 }, flash: { value: 0 }, fade: { value: 0 },
       mode: { value: mode }, pixel: { value: 3.0 }, ink: { value: mode === 2 ? 0.55 : mode === 1 ? 1.0 : 0.0 },
     };
     this.material = new THREE.ShaderMaterial({
@@ -32,7 +32,7 @@ export class StylePass extends Pass {
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: /* glsl */`
         uniform sampler2D tDiffuse, tNormal, tDepth, tSmoke;
-        uniform vec2 res; uniform float near, far, time, poison, drunk, flash, fade, pixel, ink, useSmoke; uniform int mode;
+        uniform vec2 res; uniform float near, far, time, poison, drunk, sway, flash, fade, pixel, ink, useSmoke; uniform int mode;
         varying vec2 vUv;
         float lin(float d){ float z = d * 2.0 - 1.0; return 2.0 * near * far / (far + near - z * (far - near)); }
         float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -53,16 +53,16 @@ export class StylePass extends Pass {
           vec2 px = 1.0 / res;
           if (mode == 2) { vec2 cell = pixel * px; uv = (floor(uv / cell) + 0.5) * cell; }
           uv += poison * 0.007 * vec2(sin(uv.y * 16.0 + time * 2.7), cos(uv.x * 13.0 + time * 2.1));
-          // опьянение (0…1, растёт с каждым глотком): картинка медленно плывёт волнами
-          if (drunk > 0.001) {
-            float t = time * (0.55 + drunk * 0.35);
-            uv += drunk * vec2(0.009 * sin(uv.y * 4.0 + t * 1.3) + 0.005 * sin(uv.y * 9.0 - t * 0.8),
+          // опьянение, волны (sway, растёт с глотками): картинка медленно плывёт
+          if (sway > 0.001) {
+            float t = time * (0.55 + sway * 0.35);
+            uv += sway * vec2(0.009 * sin(uv.y * 4.0 + t * 1.3) + 0.005 * sin(uv.y * 9.0 - t * 0.8),
                                0.007 * cos(uv.x * 3.5 + t * 1.1) + 0.004 * cos(uv.x * 8.0 + t * 0.7));
           }
           vec2 d = uv - 0.5;
           float ca = 0.0008 + poison * 0.008 + flash * 0.004;
           vec3 col = vec3(texture2D(tDiffuse, uv + d * ca).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - d * ca).b);
-          // двоится в глазах: вторая копия кадра ездит вокруг, чем пьянее — тем дальше и заметнее
+          // опьянение, двоение (drunk): вторая копия кадра ездит вокруг, чем пьянее — тем дальше
           if (drunk > 0.001) {
             float t = time * 0.6;
             vec2 dir = normalize(vec2(sin(t * 0.83) + 1.6, 0.6 * cos(t * 1.13)));

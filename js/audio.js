@@ -114,9 +114,11 @@ export class Audio {
       const out = c.createGain(); out.gain.value = 0;
       const send = c.createGain(); send.gain.value = 0.35;
       const an = c.createAnalyser(); an.fftSize = 256;
-      hp.connect(mid); mid.connect(sh); sh.connect(lp); lp.connect(an); lp.connect(panner); panner.connect(out); out.connect(this.master);
-      lp.connect(send); send.connect(this.verb);
-      this.spkChain = { input: hp, panner, out, an, data: new Uint8Array(an.frequencyBinCount) };
+      // громкость из настроек — после анализатора: динамик качается от музыки при любой громкости
+      const vol = c.createGain(); vol.gain.value = this.spkVol ?? 1;
+      hp.connect(mid); mid.connect(sh); sh.connect(lp); lp.connect(an); lp.connect(vol); vol.connect(panner); panner.connect(out); out.connect(this.master);
+      vol.connect(send); send.connect(this.verb);
+      this.spkChain = { input: hp, panner, out, an, vol, data: new Uint8Array(an.frequencyBinCount) };
       if (this.spkPos) this.setSpeaker(this.spkPos.p, this.spkPos.d);
     }
     const src = c.createBufferSource();
@@ -135,6 +137,11 @@ export class Audio {
     this.spkChain.out.gain.setTargetAtTime(0, c.currentTime, 0.3);
     try { s.src.stop(c.currentTime + 1.2); } catch { /* уже остановлен */ }
     this.spk = null;
+  }
+
+  setSpeakerVol(v) {
+    this.spkVol = v;
+    if (this.spkChain) this.spkChain.vol.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
   }
 
   setSpeaker(p, d) {
