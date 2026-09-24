@@ -1,0 +1,17 @@
+{
+  "name": "liars-bar-chokolator",
+  "version": "1.0.0",
+  "description": "Бар Лжецов: 3D-карточная игра на блеф с мультиплеером",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
+  "license": "MIT"
+}
