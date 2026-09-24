@@ -7,7 +7,7 @@ import { StylePass } from './post.js';
 import { STYLE, STYLES, STYLE_NAMES, TOON } from './style.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as T from './textures.js';
-import { buildWorld, TABLE_Y } from './world.js';
+import { buildWorld, TABLE_Y, TABLE_R } from './world.js';
 import { Character } from './characters.js';
 import { Cards, Particles, addButt, makeButt } from './fx.js';
 import { Audio } from './audio.js';
@@ -43,7 +43,7 @@ T.setAniso(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#0c0907');
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.02, 200);
-camera.position.set(-5, 2.2, 0);
+camera.position.set(4, 1.8, -5);
 
 const rt = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), { type: THREE.HalfFloatType, samples: Q.samples });
 const composer = new EffectComposer(renderer, rt);
@@ -62,13 +62,17 @@ let world, chars = [], cards, particles;
 const cardImg = {};
 const portraits = [];
 
+const LOOK0 = { yaw: 0, pitch: 0.3 }; // по умолчанию взгляд на стол, карты видны внизу
 const G = {
   st: null, pid: null, mySeat: -1, code: '', solo: false, recvAt: 0,
   screen: 'loading', timers: [], sel: new Set(), handKey: '',
   visualShots: [0, 0, 0, 0], visualDead: [false, false, false, false],
-  look: { x: 0, y: 0, tx: 0, ty: 0 }, attn: null, shake: 0, flash: 0, poison: 0,
+  look: { ...LOOK0 }, mouse: { x: 0.5, y: 0.5 }, shake: 0, flash: 0, poison: 0,
   spectate: false, lastSmoke: 0, camMode: 'orbit', fade: 1, dealing: false,
+  locked: false, zoom: false, aim: null, hover: -1, pendingPlay: null,
+  sens: clamp(+store.get('sens', '1') || 1, 0.25, 3),
 };
+if (isMobile) document.body.classList.add('touch');
 
 const net = new Net(onMsg);
 
@@ -117,13 +121,14 @@ async function boot() {
   const pud = new THREE.Mesh(particles.puddleGeo, particles.puddleM); warm.add(pud);
   warm.position.set(0, TABLE_Y + 0.05, 0);
   scene.add(warm);
+  const glowW = new THREE.Mesh(cards.glowGeo, cards.glowSel); warm.add(glowW);
   chars.forEach((c) => { c.cig.visible = true; });
-  particles.smokes[0].visible = true;
+  particles.smoke(V(0, TABLE_Y + 0.3, 0), V(), 0.01, 0.05, 0);
+  particles.update(0.001);
   renderer.compile(scene, camera);
   composer.render(0.016);
   scene.remove(warm);
   chars.forEach((c) => { c.cig.visible = false; });
-  particles.smokes[0].visible = false;
   setP(88, 'Зажигаем гирлянды…');
   await nextFrame();
   renderPortraits();
@@ -163,8 +168,40 @@ function renderPortraits() {
 function showScreen(s) {
   G.screen = s;
   for (const id of ['menu', 'lobby', 'hud']) $(id).classList.toggle('hidden', id !== s);
-  if (s !== 'hud') $('over').classList.add('hidden');
+  if (s !== 'hud') { $('over').classList.add('hidden'); unlock(); }
   if (s === 'menu') { G.camMode = 'orbit'; $('nameIn').value = $('nameIn').value || store.get('name', ''); }
+  updatePause();
+}
+
+// ---------- захват мыши (вид от первого лица) ----------
+function lock() {
+  if (isMobile || G.locked || G.screen !== 'hud') return;
+  try {
+    const p = canvas.requestPointerLock({ unadjustedMovement: true });
+    if (p && p.catch) p.catch(() => { try { const q = canvas.requestPointerLock(); if (q && q.catch) q.catch(() => {}); } catch { /* браузер не дал */ } });
+  } catch { try { canvas.requestPointerLock(); } catch { /* браузер не дал */ } }
+}
+function unlock() { if (document.pointerLockElement) document.exitPointerLock(); }
+document.addEventListener('pointerlockchange', () => {
+  G.locked = document.pointerLockElement === canvas;
+  document.body.classList.toggle('locked', G.locked);
+  if (!G.locked) G.zoom = false;
+  updatePause();
+});
+document.addEventListener('pointerlockerror', () => updatePause());
+
+function updatePause() {
+  const show = G.screen === 'hud' && !G.locked && !isMobile && $('over').classList.contains('hidden') && $('rules').classList.contains('hidden');
+  const el = $('pause');
+  if (show && el.classList.contains('hidden')) {
+    const first = !G.wasLocked;
+    $('pauseLabel').textContent = first ? 'Партия началась' : 'Пауза';
+    $('pauseTitle').textContent = first ? 'Садись за стол' : 'Ты отошёл от стола';
+    $('pauseSub').textContent = first ? 'Мышь управляет взглядом, курсора в игре нет. Карты — у тебя в руках: наведи на карту и жми ЛКМ.' : 'Партия идёт без остановки. Кликни, чтобы вернуться.';
+    $('resumeBtn').textContent = first ? 'Сесть за стол' : 'Вернуться за стол';
+  }
+  if (G.locked) G.wasLocked = true;
+  el.classList.toggle('hidden', !show);
 }
 
 function toast(msg, ms = 2600) {
@@ -231,6 +268,7 @@ function goSolo() {
 }
 
 function leave() {
+  unlock();
   net.close();
   clearTimers();
   G.st = null; G.mySeat = -1; G.spectate = false;
@@ -259,8 +297,8 @@ function onState(st) {
     renderLobby();
     syncStatic(st);
   } else {
-    if (G.screen !== 'hud') { showScreen('hud'); }
-    if (fresh) { clearTimers(); resetVisuals(prev && prev.ph !== 'lobby' && prev.ph !== 'over'); syncAll(st); }
+    if (G.screen !== 'hud') { G.wasLocked = false; showScreen('hud'); }
+    if (fresh) { clearTimers(); resetVisuals(prev && prev.ph !== 'lobby' && prev.ph !== 'over'); G.look = { ...LOOK0 }; syncAll(st); }
     else handleEvent(prev, st);
   }
   // сигареты
@@ -280,6 +318,7 @@ function resetVisuals(clearMess) {
   if (clearMess) particles.clearMess();
   world.bottles.forEach((b) => b.reset());
   chars.forEach((c, i) => { c.setDead(false); c.action = null; cards.setFan(i, 0); });
+  G.sel.clear(); G.pendingPlay = null; G.handKey = '';
   G.visualShots = [0, 0, 0, 0];
   G.visualDead = [false, false, false, false];
   G.poison = 0;
@@ -299,7 +338,7 @@ function syncAll(st) {
     world.bottles[i].setLevel((SHOTS - s.shots) / SHOTS);
     if (!s.alive) world.bottles[i].poison();
     chars[i].setDead(!s.alive, true);
-    cards.setFan(i, i === G.mySeat ? 0 : s.n);
+    syncFan(i, st);
   });
   if ((st.ph === 'reveal' || st.ph === 'drink') && st.rev) {
     cards.setPile(st.pile);
@@ -307,6 +346,13 @@ function syncAll(st) {
   }
   if (st.ph === 'over') later(300, showOver);
   G.handKey = '';
+}
+
+// свои карты — настоящие, в руках; у остальных — рубашкой к нам
+function syncFan(i, st) {
+  const s = st.seats[i];
+  if (i === G.mySeat && s.alive) cards.setHand(i, s.hand);
+  else cards.setFan(i, s.alive ? s.n : 0);
 }
 
 function evKey(e) { return e ? `${e.k}:${e.id || ''}:${e.r || ''}:${e.s ?? ''}` : ''; }
@@ -325,10 +371,12 @@ function handleEvent(prev, st) {
       cards.setPile(0);
       chars.forEach((c) => { c.lookAt = null; });
       const seats = [];
-      st.seats.forEach((s, i) => { cards.setFan(i, 0); if (s.alive) seats.push({ seat: i, to: i === me ? camFront(0.5) : null }); });
+      st.seats.forEach((s, i) => { cards.setFan(i, 0); if (s.alive) seats.push({ seat: i }); });
       const cnt = [0, 0, 0, 0];
       G.dealing = true;
-      cards.deal(seats, (i) => { cnt[i]++; if (i !== me) cards.setFan(i, cnt[i]); audio.card(); });
+      G.sel.clear();
+      const myHand = me >= 0 ? st.seats[me].hand.slice() : [];
+      cards.deal(seats, (i) => { cnt[i]++; if (i === me) cards.setHand(i, myHand.slice(0, cnt[i])); else cards.setFan(i, cnt[i]); audio.card(); });
       later(1600, () => { G.dealing = false; syncCounts(G.st, false); });
       stamp(RANK_TABLE[st.table].toUpperCase(), `Раунд ${st.round}`, '', 1500);
       feed(`Раунд ${st.round}: ${RANK_TABLE[st.table].toLowerCase()}. ${say(st.turn, 'Ты начинаешь', 'начинает')}.`);
@@ -338,8 +386,8 @@ function handleEvent(prev, st) {
     case 'play': {
       const s = e.s, n = e.n;
       chars[s].play('throw');
-      cards.setFan(s, s === me ? 0 : st.seats[s].n);
-      cards.throwCards(s, n, prev.pile, (i) => { audio.cardSlap(); if (i === n - 1) cards.setPile(st.pile); });
+      throwFrom(s, n, prev.pile, (i) => { audio.cardSlap(); if (i === n - 1) cards.setPile(st.pile); });
+      syncFan(s, st);
       for (let i = 0; i < n; i++) later(i * 80, () => audio.card());
       const claim = `${n} ${n === 1 ? RANK_ONE[st.table] : RANK_MANY[st.table]}`;
       feed(`${nm(s)}: «${claim}»`);
@@ -352,8 +400,8 @@ function handleEvent(prev, st) {
       if (st.pile > prev.pile) {
         const n = st.pile - prev.pile;
         chars[r.on].play('throw');
-        cards.setFan(r.on, r.on === me ? 0 : st.seats[r.on].n);
-        cards.throwCards(r.on, n, prev.pile, () => { audio.cardSlap(); cards.setPile(st.pile); });
+        throwFrom(r.on, n, prev.pile, () => { audio.cardSlap(); cards.setPile(st.pile); });
+        syncFan(r.on, st);
         feed(`${nm(r.on)}: «${n} ${n === 1 ? RANK_ONE[st.table] : RANK_MANY[st.table]}», последние карты.`);
         delay = 800;
       }
@@ -362,7 +410,6 @@ function handleEvent(prev, st) {
         const tgt = chars[r.on].head.getWorldPosition(V()).add(V(0, 0.1, 0));
         chars[r.by].play('point', { target: tgt });
         chars.forEach((c, i) => { c.lookAt = i === r.by ? tgt : chars[r.by].head.getWorldPosition(V()); });
-        G.attn = { p: chars[r.on].head.getWorldPosition(V()), until: performance.now() + 3500, w: 0.55 };
         stamp('ЛЖЕЦ!', `${who(r.by)} → ${who(r.on)}${r.f ? ' · карты остались только у одного' : ''}`, 'red', 1500);
         audio.liar();
         G.shake = 0.5; G.flash = 1;
@@ -382,7 +429,6 @@ function handleEvent(prev, st) {
       const ch = chars[s];
       ch.play('drink');
       chars.forEach((c, i) => { c.lookAt = i === s ? null : ch.head.getWorldPosition(V()); });
-      G.attn = { p: ch.head.getWorldPosition(V()), until: performance.now() + 7000, w: 0.6 };
       audio.heartbeat(5, 0.7);
       later(400, () => audio.glass());
       const shotsBefore = d.n - 1;
@@ -423,8 +469,16 @@ function handleEvent(prev, st) {
 function syncCounts(st, skipFanFor) {
   if (G.dealing) return;
   st.seats.forEach((s, i) => {
-    if (!(skipFanFor && st.ev && st.ev.s === i)) cards.setFan(i, i === G.mySeat ? 0 : s.n);
+    if (!(skipFanFor && st.ev && st.ev.s === i)) syncFan(i, st);
   });
+}
+
+// Свои выбранные карты вылетают прямо из руки; чужие (и ход по таймауту) — из веера.
+function throwFrom(s, n, pileStart, onEach) {
+  const pend = G.pendingPlay;
+  G.pendingPlay = null;
+  if (s === G.mySeat && pend && pend.length === n) cards.throwFromHand(s, pend, pileStart, onEach);
+  else cards.throwCards(s, n, pileStart, onEach);
 }
 
 function showOver() {
@@ -435,6 +489,8 @@ function showOver() {
   $('overSub').textContent = w === G.mySeat ? 'Все остальные выбыли. Чеколейтор тебя пощадил.' : 'Чеколейтор сегодня был не на твоей стороне.';
   $('againBtn').disabled = G.mySeat < 0;
   $('over').classList.remove('hidden');
+  unlock();
+  updatePause();
 }
 
 function paintSplat() {
@@ -451,10 +507,6 @@ function paintSplat() {
   }
   c.style.transition = 'none'; c.style.opacity = '1';
   setTimeout(() => { c.style.transition = 'opacity 6s ease'; c.style.opacity = '0'; }, 1500);
-}
-
-function camFront(dist) {
-  return camera.localToWorld(V(0, -0.25, -dist));
 }
 
 // ---------- лобби ----------
@@ -554,42 +606,34 @@ function pipsHtml(i) {
 
 function renderHand() {
   const st = G.st;
-  const hand = G.mySeat >= 0 ? st.seats[G.mySeat].hand : [];
+  const me = G.mySeat;
+  const hand = me >= 0 ? st.seats[me].hand : [];
   const key = `${st.round}|${hand.join('')}`;
-  const box = $('hand');
-  if (key !== G.handKey) {
-    const dealt = st.ev && st.ev.k === 'deal' && !G.handKey.startsWith(`${st.round}|`);
-    G.handKey = key;
-    G.sel.clear();
-    box.innerHTML = '';
-    hand.forEach((c, i) => {
-      const el = document.createElement('button');
-      el.className = 'card' + (dealt ? ' deal-in' : '');
-      el.style.backgroundImage = `url(${cardImg[c]})`;
-      const r = (i - (hand.length - 1) / 2) * 5;
-      el.style.setProperty('--r', `${r}deg`);
-      el.style.transform = `rotate(${r}deg) translateY(${Math.abs(r) * 0.8}px)`;
-      if (dealt) el.style.animationDelay = `${0.35 + i * 0.12}s`;
-      el.setAttribute('aria-label', RANK_ONE[c]);
-      const k = document.createElement('span'); k.className = 'k'; k.textContent = i + 1; el.appendChild(k);
-      el.addEventListener('click', () => toggleCard(i));
-      box.appendChild(el);
-    });
-  }
-  [...box.children].forEach((el, i) => el.classList.toggle('sel', G.sel.has(i)));
-  const myTurn = st.ph === 'turn' && st.turn === G.mySeat && G.mySeat >= 0;
-  $('playBtn').disabled = !myTurn || G.sel.size < 1 || G.sel.size > 3;
+  if (key !== G.handKey) { G.handKey = key; G.sel.clear(); }
+  if (me >= 0 && !G.dealing && !G.visualDead[me]) cards.setHand(me, hand);
+  const myTurn = st.ph === 'turn' && st.turn === me && me >= 0;
+  const alive = me >= 0 && !G.visualDead[me];
+  const canPlay = myTurn && G.sel.size >= 1 && G.sel.size <= 3;
+  const canLiar = me >= 0 && canCall(st, me);
+  $('playBtn').disabled = !canPlay;
   $('playBtn').textContent = G.sel.size ? `Выложить ${G.sel.size}` : 'Выложить';
-  $('liarBtn').disabled = !(G.mySeat >= 0 && canCall(st, G.mySeat));
-  const alive = G.mySeat >= 0 && !G.visualDead[G.mySeat];
+  $('liarBtn').disabled = !canLiar;
   $('playBtn').parentElement.classList.toggle('hidden', !alive);
-  box.classList.toggle('hidden', !alive);
+  // подсказки клавиш
+  $('keys').classList.toggle('hidden', !alive);
+  $('kPick').classList.toggle('off', !hand.length);
+  $('kPlay').classList.toggle('off', !canPlay);
+  $('kPlay').classList.toggle('go', canPlay);
+  $('kPlayT').textContent = G.sel.size ? `Выложить ${G.sel.size}` : myTurn ? 'Выбери 1–3 карты' : 'Выложить';
+  $('kLiar').classList.toggle('off', !canLiar);
+  $('kLiar').classList.toggle('go', canLiar);
+  G.aimKey = ''; // подсказка у прицела зависит от выбора — пересчитать
   updateSmokeBtn();
 }
 
 function toggleCard(i) {
   const st = G.st;
-  if (!st || G.mySeat < 0) return;
+  if (!st || G.mySeat < 0 || G.visualDead[G.mySeat] || G.dealing) return;
   const hand = st.seats[G.mySeat].hand;
   if (i >= hand.length) return;
   audio.init();
@@ -600,8 +644,16 @@ function toggleCard(i) {
   renderHand();
 }
 
+function clearSel() {
+  if (!G.sel.size) return;
+  G.sel.clear();
+  audio.select();
+  renderHand();
+}
+
 function playSelected() {
   if ($('playBtn').disabled) return;
+  G.pendingPlay = [...G.sel];
   net.send({ t: 'play', a: [...G.sel] });
   G.sel.clear();
 }
@@ -624,7 +676,10 @@ function updateSmokeBtn() {
   const left = Math.ceil((13000 - (Date.now() - G.lastSmoke)) / 1000);
   const can = st && G.mySeat >= 0 && !G.visualDead[G.mySeat] && left <= 0;
   $('smokeBtn').disabled = !can;
-  $('smokeSub').textContent = left > 0 ? `Куришь… ${left} с` : 'Chapman Red';
+  const t = left > 0 ? `Куришь… ${left} с` : 'Chapman Red';
+  $('smokeSub').textContent = t;
+  $('smokeSubT').textContent = t;
+  $('kSmoke').classList.toggle('off', !can);
 }
 
 function renderStatus() {
@@ -652,12 +707,15 @@ function updatePlates() {
   const w = innerWidth, h = innerHeight;
   plateEls.forEach((el, i) => {
     if (!el) return;
-    if (el.dataset.me === '1') { el.style.opacity = '0'; return; }
-    const p = chars[i].head.localToWorld(V(0, 0.42, 0)).project(camera);
-    const vis = p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2;
-    el.style.opacity = vis ? '1' : '0';
-    el.style.left = `${clamp((p.x * 0.5 + 0.5) * w, 90, w - 90)}px`;
-    el.style.top = `${clamp((-p.y * 0.5 + 0.5) * h, 190, h - 250)}px`;
+    const p = chars[i].head.localToWorld(tmpV.set(0, 0.42, 0)).project(camera);
+    const vis = el.dataset.me !== '1' && p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2;
+    const op = vis ? '1' : '0';
+    if (el._op !== op) { el._op = op; el.style.opacity = op; }
+    if (!vis) return;
+    // только transform: без перерасчёта раскладки страницы каждый кадр
+    const x = Math.round(clamp((p.x * 0.5 + 0.5) * w, 90, w - 90)), y = Math.round(clamp((-p.y * 0.5 + 0.5) * h, 190, h - 250));
+    const tr = `translate3d(${x}px, ${y}px, 0) translate(-50%, -100%)`;
+    if (el._tr !== tr) { el._tr = tr; el.style.transform = tr; }
   });
   // таймер хода
   const st = G.st;
@@ -666,14 +724,23 @@ function updatePlates() {
     const total = st.dl - st.now;
     const left = total - (Date.now() - G.recvAt);
     tm.classList.remove('hidden');
-    $('timerBar').style.width = `${clamp(left / 45000, 0, 1) * 100}%`;
-    $('timerBar').style.background = left < 10000 ? 'var(--ember)' : 'var(--amber)';
+    $('timerBar').style.transform = `scaleX(${clamp(left / 45000, 0, 1).toFixed(3)})`;
+    const bg = left < 10000 ? 'var(--ember)' : 'var(--amber)';
+    if (tm._bg !== bg) { tm._bg = bg; $('timerBar').style.background = bg; }
   } else tm.classList.add('hidden');
 }
 
 // ---------- кадр ----------
 const tmpQ = new THREE.Quaternion();
+const tmpV = new THREE.Vector3();
+const tmpE = new THREE.Euler(0, 0, 0, 'YXZ');
+const tmpM = new THREE.Matrix4();
 const flipY = new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), Math.PI);
+const UPV = V(0, 1, 0);
+const ray = new THREE.Raycaster();
+const CENTER = new THREE.Vector2(0, 0);
+const tablePlane = new THREE.Plane(V(0, 1, 0), -TABLE_Y);
+const YAW_MAX = 1.9, PITCH_MIN = -0.95, PITCH_MAX = 1.25;
 let idleLookAt = 0;
 
 function stepChars(dt, time) {
@@ -687,6 +754,57 @@ function stepChars(dt, time) {
       onButt: () => addButt(world.ashtray),
     });
   }
+}
+
+// Что под прицелом: карта в руке, стол (выложить) или игрок, которого можно вскрыть.
+const headS = new THREE.Sphere(V(), 0.2), torsoS = new THREE.Sphere(V(), 0.26);
+function updateAim(ndc = CENTER) {
+  const st = G.st, me = G.mySeat;
+  let aim = null;
+  if (st && me >= 0 && !G.visualDead[me] && !G.dealing) {
+    ray.setFromCamera(ndc, camera);
+    const hit = ray.intersectObjects(cards.handMeshes(me), false)[0];
+    if (hit) aim = { t: 'card', i: hit.object.userData.handIdx };
+    else {
+      if (canCall(st, me)) {
+        const ch = chars[st.last.s];
+        ch.head.localToWorld(headS.center.set(0, ch.headC.y, 0));
+        ch.root.localToWorld(torsoS.center.set(0, 0.82, 0.05));
+        if (ray.ray.intersectsSphere(headS) || ray.ray.intersectsSphere(torsoS)) aim = { t: 'liar' };
+      }
+      if (!aim && G.sel.size && st.ph === 'turn' && st.turn === me) {
+        const p = ray.ray.intersectPlane(tablePlane, tmpV);
+        if (p && Math.hypot(p.x, p.z) < TABLE_R * 0.85) aim = { t: 'table' };
+      }
+    }
+  }
+  G.hover = aim && aim.t === 'card' ? aim.i : -1;
+  const key = aim ? `${aim.t}${aim.i ?? ''}:${G.sel.size}:${aim.i !== undefined && G.sel.has(aim.i) ? 's' : ''}` : '';
+  G.aim = aim;
+  if (key !== G.aimKey) { G.aimKey = key; renderAim(); }
+  return aim;
+}
+
+function renderAim() {
+  const el = $('aim'), aim = G.aim;
+  let html = '', red = false;
+  const k = isMobile ? '' : '<kbd>ЛКМ</kbd>';
+  if (aim && aim.t === 'card') {
+    if (G.sel.has(aim.i)) html = `${k}Вернуть в руку`;
+    else if (G.sel.size >= 3) html = 'Больше трёх нельзя';
+    else html = `${k}Взять карту`;
+  } else if (aim && aim.t === 'table') html = `${k}Выложить ${G.sel.size}`;
+  else if (aim && aim.t === 'liar') { html = `${k}ЛЖЕЦ!`; red = true; }
+  el.innerHTML = html;
+  el.classList.toggle('red', red);
+  $('cross').classList.toggle('hot', !!aim);
+}
+
+function primaryAction(aim = G.aim) {
+  if (!aim) return;
+  if (aim.t === 'card') toggleCard(aim.i);
+  else if (aim.t === 'table') playSelected();
+  else if (aim.t === 'liar') callLiar();
 }
 
 function loop() {
@@ -718,52 +836,59 @@ function loop() {
   const snap = G.camMode !== G.prevCam;
   G.prevCam = G.camMode;
 
-  // взгляд мышью
-  G.look.x += (G.look.tx - G.look.x) * Math.min(1, dt * 6);
-  G.look.y += (G.look.ty - G.look.y) * Math.min(1, dt * 6);
+  // взгляд: мышь поворачивает голову напрямую, без сглаживания
+  chars.forEach((c) => { c.fp = null; });
   if (G.camMode === 'fp') {
     const me = chars[G.mySeat];
-    const yaw = G.look.x * 1.05;
-    let target = me.root.localToWorld(V(Math.sin(yaw) * 1.4, 0.86 - G.look.y * 0.95, Math.cos(yaw) * 1.4));
-    if (G.attn && performance.now() < G.attn.until) target = target.lerp(G.attn.p, G.attn.w);
-    me.lookAt = target;
+    if (G.screen === 'hud') me.fp = G.look;
+    else me.fp = { yaw: -(G.mouse.x - 0.5) * 0.9, pitch: 0.2 + (G.mouse.y - 0.5) * 0.5 }; // лобби: курсор свободен
   }
 
   stepChars(dt, time);
   cards.update(dt);
-  particles.update(dt, camera);
+  particles.update(dt);
 
   // камера
+  const zoomK = 1 - Math.pow(0.000001, dt);
   if (G.camMode === 'fp') {
     const me = chars[G.mySeat];
-    const eye = me.head.localToWorld(V(0, me.headC.y + 0.03, me.headC.z + 0.075));
-    camera.position.lerp(eye, snap ? 1 : 1 - Math.pow(0.0001, dt));
-    me.head.getWorldQuaternion(tmpQ).multiply(flipY);
-    camera.quaternion.slerp(tmpQ, snap ? 1 : 1 - Math.pow(0.0005, dt));
-    camera.fov += (57 - camera.fov) * (snap ? 1 : dt * 3);
+    // позиция — глаза персонажа, поворот — ровно туда, куда смотрит мышь (+ то, что добавила анимация)
+    me.head.updateWorldMatrix(true, false);
+    me.head.localToWorld(camera.position.set(0, me.headC.y + 0.03, me.headC.z + 0.075));
+    tmpE.set(me.s.pitch + me.s.lean * 0.35, me.s.yaw, me.s.roll);
+    camera.quaternion.copy(me.root.quaternion).multiply(tmpQ.setFromEuler(tmpE)).multiply(flipY);
+    const fov = G.zoom && G.screen === 'hud' ? 30 : 57;
+    camera.fov = snap ? fov : camera.fov + (fov - camera.fov) * zoomK;
   } else if (G.camMode === 'spect') {
-    const a = time * 0.07;
-    const p = V(Math.sin(a) * 2.1, 2.05, Math.cos(a) * 2.1);
-    camera.position.lerp(p, dt * 1.5);
+    // зритель: облёт стола, мышь крутит и наклоняет
+    const a = time * 0.05 + G.look.yaw * 1.6;
+    const hgt = 2.05 + clamp(G.look.pitch - LOOK0.pitch, -0.6, 0.8) * 0.9;
+    camera.position.set(Math.sin(a) * 1.85, hgt, Math.cos(a) * 1.85);
     camera.lookAt(0, TABLE_Y + 0.15, 0);
-    camera.fov += (55 - camera.fov) * dt * 2;
+    camera.fov = 55;
   } else {
     const t = time;
-    const p = V(-3.75 + Math.sin(t * 0.09) * 0.35, 1.5 + Math.sin(t * 0.13) * 0.08, 1.25 + Math.sin(t * 0.07) * 0.5);
-    if (G.screen === 'lobby') p.set(-2.6 + Math.sin(t * 0.1) * 0.4, 1.75, 1.6 + Math.sin(t * 0.08) * 0.3);
-    camera.position.lerp(p, snap ? 1 : Math.min(1, dt * 0.8));
-    const look = G.screen === 'lobby' ? V(0.2, 1.0, 0) : V(0.35, 0.98, -0.25);
-    look.x -= G.look.x * 0.6; look.y -= G.look.y * 0.3;
-    const m = new THREE.Matrix4().lookAt(camera.position, look, V(0, 1, 0));
-    tmpQ.setFromRotationMatrix(m);
-    camera.quaternion.slerp(tmpQ, snap ? 1 : Math.min(1, dt * 2));
-    camera.fov += (50 - camera.fov) * (snap ? 1 : dt * 2);
+    // меню и лобби: вид со двора на навес (катушки за спиной, дерево слева)
+    const p = tmpV.set(0.2 + Math.sin(t * 0.09) * 0.45, 1.6 + Math.sin(t * 0.13) * 0.08, -4.7 + Math.sin(t * 0.07) * 0.25);
+    if (G.screen === 'lobby') p.set(2.3 + Math.sin(t * 0.1) * 0.3, 1.8, -3.3 + Math.sin(t * 0.08) * 0.2);
+    camera.position.lerp(p, snap ? 1 : Math.min(1, dt * 0.8)); // медленный облёт меню — это съёмка, а не управление
+    const look = G.screen === 'lobby' ? V(0.1, 1.0, 0.1) : V(0.9, 1.05, 0.4);
+    look.x -= (G.mouse.x - 0.5) * 1.2; look.y -= (G.mouse.y - 0.5) * 0.6;
+    tmpM.lookAt(camera.position, look, UPV);
+    camera.quaternion.setFromRotationMatrix(tmpM);
+    camera.fov += (50 - camera.fov) * (snap ? 1 : Math.min(1, dt * 2));
   }
   if (G.shake > 0) {
     G.shake = Math.max(0, G.shake - dt * 1.4);
     camera.position.add(V((Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.02, 0).multiplyScalar(G.shake));
   }
   camera.updateProjectionMatrix();
+  camera.updateMatrixWorld();
+
+  // карты в руке и то, на что смотрит прицел
+  const fpPlay = G.camMode === 'fp' && G.screen === 'hud' && G.mySeat >= 0;
+  if (G.mySeat >= 0) cards.updateHand(G.mySeat, dt, camera.position, fpPlay ? G.hover : -1, G.sel);
+  if (fpPlay) updateAim(); else if (G.aim || G.hover >= 0) { G.aim = null; G.aimKey = ''; G.hover = -1; renderAim(); }
 
   // свет: мерцание гирлянд
   world.flicker.forEach((f) => { f.l.intensity = f.base * (0.92 + Math.sin(time * 3 + f.ph) * 0.04 + Math.sin(time * 11.3 + f.ph * 2) * 0.03); });
@@ -797,34 +922,90 @@ function loop() {
     u2.led.material.emissiveIntensity = 2 + push * 3;
   }
   if (G.screen === 'hud' && Math.floor(time * 2) !== Math.floor((time - dt) * 2)) updateSmokeBtn();
+  const crossOn = fpPlay && G.locked && !G.visualDead[G.mySeat];
+  if (crossOn !== G.crossOn) { G.crossOn = crossOn; $('cross').classList.toggle('hidden', !crossOn); }
   composer.render(dt);
 }
 
 // ---------- ввод ----------
-// Осмотр: зажми кнопку мыши (или палец) и тяни. Тянешь вправо — смотришь вправо.
-let drag = null;
-canvas.addEventListener('pointerdown', (e) => {
-  drag = { x: e.clientX, y: e.clientY, lx: G.look.tx, ly: G.look.ty, id: e.pointerId };
-  try { canvas.setPointerCapture(e.pointerId); } catch { /* не критично */ }
-  canvas.classList.add('dragging');
+// Мышь захвачена: движение крутит взгляд напрямую, без инерции. Курсора в игре нет.
+const inHud = () => G.screen === 'hud' && $('over').classList.contains('hidden') && $('rules').classList.contains('hidden');
+document.addEventListener('mousemove', (e) => {
+  if (G.locked) {
+    const k = 0.0022 * G.sens * (G.zoom ? 0.55 : 1);
+    const dx = clamp(e.movementX, -400, 400), dy = clamp(e.movementY, -400, 400); // срезаем редкие скачки драйвера
+    G.look.yaw = clamp(G.look.yaw - dx * k, -YAW_MAX, YAW_MAX);
+    G.look.pitch = clamp(G.look.pitch + dy * k, PITCH_MIN, PITCH_MAX);
+  } else if (!isMobile) {
+    G.mouse.x = e.clientX / innerWidth;
+    G.mouse.y = e.clientY / innerHeight;
+  }
 });
-const endDrag = () => { drag = null; canvas.classList.remove('dragging'); };
-addEventListener('pointerup', endDrag);
-addEventListener('pointercancel', endDrag);
+canvas.addEventListener('mousedown', (e) => {
+  if (isMobile || !inHud()) return;
+  if (!G.locked) { if (e.button === 0) lock(); return; }
+  if (e.button === 0) primaryAction();
+  else if (e.button === 2) G.zoom = true;
+});
+document.addEventListener('mouseup', (e) => { if (e.button === 2) G.zoom = false; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-addEventListener('pointermove', (e) => {
-  if (!drag || e.pointerId !== drag.id) return;
-  G.look.tx = clamp(drag.lx - (e.clientX - drag.x) / innerWidth * 2.4, -1, 1);
-  G.look.ty = clamp(drag.ly + (e.clientY - drag.y) / innerHeight * 2.4, -1, 0.45);
-});
 
+// Сенсорный экран: тянешь — смотришь, тап — действие с тем, что под пальцем.
+let touch = null;
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse') return;
+  touch = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, id: e.pointerId, moved: false };
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* не критично */ }
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!touch || e.pointerId !== touch.id) return;
+  const k = 0.005 * G.sens;
+  G.look.yaw = clamp(G.look.yaw - (e.clientX - touch.x) * k, -YAW_MAX, YAW_MAX);
+  G.look.pitch = clamp(G.look.pitch + (e.clientY - touch.y) * k, PITCH_MIN, PITCH_MAX);
+  touch.x = e.clientX; touch.y = e.clientY;
+  if (Math.hypot(e.clientX - touch.sx, e.clientY - touch.sy) > 10) touch.moved = true;
+});
+const endTouch = (e) => {
+  if (!touch || e.pointerId !== touch.id) return;
+  if (!touch.moved && inHud() && G.camMode === 'fp') {
+    primaryAction(updateAim(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)));
+  }
+  touch = null;
+};
+canvas.addEventListener('pointerup', endTouch);
+canvas.addEventListener('pointercancel', () => { touch = null; });
+
+function toggleSound() { audio.init(); audio.setMuted(!audio.muted); syncAudioBtns(); }
+function toggleMusic() { audio.init(); audio.setMusic(!audio.music); syncAudioBtns(); }
+function toggleFs() { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(() => {}); }
+function syncAudioBtns() {
+  $('sndBtn').classList.toggle('off', audio.muted);
+  $('musBtn').classList.toggle('off', !audio.music);
+  $('pSnd').textContent = `Звук: ${audio.muted ? 'выкл' : 'вкл'}`;
+  $('pMus').textContent = `Музыка: ${audio.music ? 'вкл' : 'выкл'}`;
+}
+function openRules() { unlock(); $('rules').classList.remove('hidden'); updatePause(); }
+function closeRules() { $('rules').classList.add('hidden'); updatePause(); lock(); }
+
+// Бинды по физическим клавишам (e.code): работают и в русской раскладке.
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') { e.target.id === 'codeIn' ? goOnline(false) : goOnline(true); } return; }
+  const tg = e.target;
+  if (tg.tagName === 'INPUT' && tg.type !== 'range') { if (e.key === 'Enter') { tg.id === 'codeIn' ? goOnline(false) : goOnline(true); } return; }
+  if (!$('rules').classList.contains('hidden')) { if (e.code === 'Escape' || e.code === 'KeyH' || e.code === 'Enter') closeRules(); return; }
   if (G.screen !== 'hud') return;
-  if (e.key >= '1' && e.key <= '5') toggleCard(+e.key - 1);
-  else if (e.key === 'Enter') playSelected();
-  else if (e.key.toLowerCase() === 'l' || e.key.toLowerCase() === 'д') callLiar();
-  else if (e.key.toLowerCase() === 's' || e.key.toLowerCase() === 'ы') smoke();
+  if (!$('over').classList.contains('hidden')) { if (e.code === 'Enter' && !$('againBtn').disabled) $('againBtn').click(); return; }
+  if (e.repeat) return;
+  const c = e.code;
+  if (/^(Digit|Numpad)[1-5]$/.test(c)) toggleCard(+c.slice(-1) - 1);
+  else if (c === 'Space' || c === 'Enter' || c === 'NumpadEnter') { e.preventDefault(); playSelected(); }
+  else if (c === 'KeyQ' || c === 'KeyL') callLiar();
+  else if (c === 'KeyE') smoke();
+  else if (c === 'KeyX' || c === 'Backspace') clearSel();
+  else if (c === 'KeyC') { G.look.yaw = LOOK0.yaw; G.look.pitch = LOOK0.pitch; }
+  else if (c === 'KeyM') toggleMusic();
+  else if (c === 'KeyN') toggleSound();
+  else if (c === 'KeyF') toggleFs();
+  else if (c === 'KeyH' || c === 'F1') { e.preventDefault(); openRules(); }
 });
 
 addEventListener('resize', () => {
@@ -843,21 +1024,32 @@ $('leaveBtn').addEventListener('click', leave);
 $('exitBtn').addEventListener('click', leave);
 $('menuBtn2').addEventListener('click', leave);
 $('startBtn').addEventListener('click', () => { audio.init(); net.send({ t: 'start' }); });
-$('againBtn').addEventListener('click', () => net.send({ t: 'again' }));
+$('againBtn').addEventListener('click', () => { net.send({ t: 'again' }); $('over').classList.add('hidden'); updatePause(); lock(); });
 $('playBtn').addEventListener('click', playSelected);
 $('liarBtn').addEventListener('click', callLiar);
 $('smokeBtn').addEventListener('click', smoke);
-$('rulesBtn').addEventListener('click', () => $('rules').classList.remove('hidden'));
-$('helpBtn').addEventListener('click', () => $('rules').classList.remove('hidden'));
-$('rulesClose').addEventListener('click', () => $('rules').classList.add('hidden'));
-$('rules').addEventListener('click', (e) => { if (e.target.id === 'rules') $('rules').classList.add('hidden'); });
+$('rulesBtn').addEventListener('click', openRules);
+$('helpBtn').addEventListener('click', openRules);
+$('rulesClose').addEventListener('click', closeRules);
+$('rules').addEventListener('click', (e) => { if (e.target.id === 'rules') closeRules(); });
+$('resumeBtn').addEventListener('click', lock);
+$('pause').addEventListener('click', (e) => { if (e.target.id === 'pause') lock(); });
+$('pSnd').addEventListener('click', toggleSound);
+$('pMus').addEventListener('click', toggleMusic);
+$('pFs').addEventListener('click', toggleFs);
+$('pRules').addEventListener('click', openRules);
+$('pExit').addEventListener('click', leave);
+const showSens = () => { $('sensIn').value = G.sens; $('sensVal').textContent = G.sens.toFixed(2); };
+showSens();
+$('sensIn').addEventListener('input', () => { G.sens = clamp(+$('sensIn').value || 1, 0.25, 3); store.set('sens', G.sens); showSens(); });
 $('copyBtn').addEventListener('click', async () => {
   const url = `${location.origin}${location.pathname}?room=${G.code}`;
   try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована — кидай друзьям'); } catch { toast(url, 6000); }
 });
-$('sndBtn').addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); $('sndBtn').classList.toggle('off', audio.muted); });
-$('musBtn').addEventListener('click', () => { audio.init(); audio.setMusic(!audio.music); $('musBtn').classList.toggle('off', !audio.music); });
-$('fsBtn').addEventListener('click', () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(() => {}); });
+$('sndBtn').addEventListener('click', toggleSound);
+$('musBtn').addEventListener('click', toggleMusic);
+$('fsBtn').addEventListener('click', toggleFs);
+syncAudioBtns();
 const gfxNames = { high: 'высокая', mid: 'средняя', low: 'низкая' };
 $('gfxBtn').textContent = `Графика: ${gfxNames[quality] || 'средняя'}`;
 $('gfxBtn').addEventListener('click', () => {
@@ -878,5 +1070,5 @@ if (qs.get('room')) $('codeIn').value = qs.get('room').toUpperCase().slice(0, 6)
 
 window.addEventListener('error', (e) => { console.error(e.error || e.message); });
 boot().catch((e) => { console.error(e); $('loadMsg').textContent = 'Не удалось запустить 3D: ' + (e.message || e); });
-if (qs.has('debug')) Object.assign(window, { __G: G, __net: net, __chars: chars, __cam: camera, __THREE: THREE, __audio: audio });
+if (qs.has('debug')) Object.assign(window, { __G: G, __net: net, __chars: chars, __cam: camera, __THREE: THREE, __audio: audio, __renderer: renderer, __scene: scene, __composer: composer });
 if (qs.has('debug')) window.__advance = (sec) => { for (let t = 0; t < sec; t += 1 / 30) { stepChars(1 / 30, clock.elapsedTime + t); cards.update(1 / 30); particles.update(1 / 30, camera); } };
